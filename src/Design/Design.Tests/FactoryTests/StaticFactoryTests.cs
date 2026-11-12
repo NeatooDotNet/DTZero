@@ -1,0 +1,123 @@
+// =============================================================================
+// DESIGN SOURCE OF TRUTH: Static Factory Tests
+// =============================================================================
+//
+// Tests demonstrating the STATIC FACTORY pattern with [Execute].
+//
+// =============================================================================
+
+using Design.Domain.FactoryPatterns;
+using Design.Tests.TestInfrastructure;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Design.Tests.FactoryTests;
+
+/// <summary>
+/// Tests for STATIC FACTORY pattern (ExampleCommands).
+/// </summary>
+public class StaticFactoryTests
+{
+    /// <summary>
+    /// Verifies [Execute] method works through remote call.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: Execute delegates are resolved from DI
+    ///
+    /// The generator creates a nested delegate type inside the static class.
+    /// You resolve the delegate from DI and invoke it. The delegate handles
+    /// service injection and remote/local routing.
+    ///
+    /// Pattern:
+    ///   var sendNotification = scope.GetRequiredService&lt;ExampleCommands.SendNotification&gt;();
+    ///   var result = await sendNotification("recipient", "message");
+    ///
+    /// GENERATOR BEHAVIOR: For [Remote, Execute] on _SendNotification:
+    /// - Creates delegate type: ExampleCommands.SendNotification
+    /// - Registers the delegate in DI on both tiers: the client's serializes to the
+    ///   server, the server's runs the method behind an IsServerRuntime guard
+    /// - Without [Remote] (see _ScoreText and LocalExecuteTests) there is one
+    ///   unguarded local delegate and no remote one
+    /// </remarks>
+    [Fact]
+    public async Task Execute_SendNotification_ReturnsResult()
+    {
+        // Arrange
+        var (server, client, _) = DesignClientServerContainers.Scopes();
+
+        // Resolve the delegate type from DI
+        var sendNotification = client.GetRequiredService<ExampleCommands.SendNotification>();
+
+        // Act - invoke the delegate
+        var result = await sendNotification("test@example.com", "Hello!");
+
+        // Assert
+        Assert.True(result);
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    /// <summary>
+    /// Verifies [Execute] works in local mode.
+    /// </summary>
+    [Fact]
+    public async Task Execute_WorksInLocalMode()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+
+        // Resolve delegate - in local mode, executes directly
+        var sendNotification = local.GetRequiredService<ExampleCommands.SendNotification>();
+
+        // Act
+        var result = await sendNotification("local@example.com", "Local message");
+
+        // Assert
+        Assert.True(result);
+
+        local.Dispose();
+    }
+
+    /// <summary>
+    /// Verifies a Task-returning [Remote, Execute] runs on the server and completes.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: A command with no result returns Task
+    ///
+    /// The client awaits it; the await returns once the server method has run.
+    /// RecordingNotificationService replaces the server's INotificationService so
+    /// the test can see the call arrived there.
+    /// </remarks>
+    [Fact]
+    public async Task Execute_ReturningTask_RunsOnServer()
+    {
+        // Arrange
+        #region service-injection-testing
+        var recorder = new RecordingNotificationService();
+        var (server, client, _) = DesignClientServerContainers.Scopes(
+            configureServer: services => services.AddSingleton<INotificationService>(recorder));
+        #endregion
+
+        var notify = client.GetRequiredService<ExampleCommands.Notify>();
+
+        // Act
+        await notify("test@example.com", "Hello!");
+
+        // Assert
+        Assert.Equal(("test@example.com", "Hello!"), Assert.Single(recorder.Sent));
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    private sealed class RecordingNotificationService : INotificationService
+    {
+        public List<(string Recipient, string Message)> Sent { get; } = [];
+
+        public Task SendAsync(string recipient, string message)
+        {
+            Sent.Add((recipient, message));
+            return Task.CompletedTask;
+        }
+    }
+}

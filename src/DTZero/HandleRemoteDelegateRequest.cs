@@ -1,0 +1,278 @@
+using System.Diagnostics;
+using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using DTZero.Internal;
+
+namespace DTZero;
+
+public delegate Task<RemoteResponseDto> HandleRemoteDelegateRequest(RemoteRequestDto portalRequest, CancellationToken cancellationToken);
+
+
+public static class LocalServer
+{
+	private const string Result = "Result";
+
+	/// <summary>
+	/// Prepares invoke parameters by injecting CancellationToken where expected.
+	/// CancellationToken is excluded from serialized parameters but flows through the HTTP layer.
+	/// </summary>
+	private static object?[] PrepareInvokeParameters(
+		IReadOnlyCollection<object?>? serializedParams,
+		ParameterInfo[] methodParams,
+		CancellationToken cancellationToken)
+	{
+		var result = new object?[methodParams.Length];
+		var paramsList = serializedParams?.ToArray() ?? [];
+		var serializedIndex = 0;
+
+		for (int i = 0; i < methodParams.Length; i++)
+		{
+			if (methodParams[i].ParameterType == typeof(CancellationToken))
+			{
+				// Inject the CancellationToken from the HTTP layer
+				result[i] = cancellationToken;
+			}
+			else if (serializedIndex < paramsList.Length)
+			{
+				result[i] = paramsList[serializedIndex++];
+			}
+			else
+			{
+				// Use default for missing parameters
+				result[i] = methodParams[i].HasDefaultValue ? methodParams[i].DefaultValue : null;
+			}
+		}
+
+		return result;
+	}
+
+	public static HandleRemoteDelegateRequest HandlePortalRequest(IServiceProvider serviceProvider)
+	{
+		return HandlePortalRequest(serviceProvider, null);
+	}
+
+	public static HandleRemoteDelegateRequest HandlePortalRequest(IServiceProvider serviceProvider, ILogger? logger)
+	{
+		var log = logger ?? NullLoggerFactory.Instance.CreateLogger(DTZeroLoggerCategories.Server);
+
+		var trace = serviceProvider.GetService<ILoggerFactory>()?.CreateLogger("Trace.DTZero")
+			?? NullLoggerFactory.Instance.CreateLogger("Trace.DTZero");
+
+		return async (portalRequest, cancellationToken) =>
+		{
+			// Resolve correlation context from request scope (set by middleware)
+			var correlationContext = serviceProvider.GetRequiredService<ICorrelationContext>();
+			// Correlation ID is set by middleware; generate if missing (e.g., direct server calls)
+			var correlationId = correlationContext.CorrelationId ?? CorrelationContextImpl.GenerateCorrelationId();
+			var delegateTypeName = portalRequest.DelegateFullName ?? "unknown";
+
+			log.HandlingRemoteRequest(correlationId, delegateTypeName);
+			var sw = Stopwatch.StartNew();
+
+			var serializer = serviceProvider.GetRequiredService<IDTZeroJsonSerializer>();
+
+			try
+			{
+				// Check for cancellation before processing
+				cancellationToken.ThrowIfCancellationRequested();
+
+				// Wire refusal (EXRM-001): a static-factory [Execute] without [Remote] is local-only.
+				// It is registered in server DI (it runs locally on the server too), so without this
+				// check a crafted request naming its delegate type would execute it with server
+				// services. Refuse BEFORE deserializing parameters, and surface it exactly as an
+				// unknown delegate so a caller cannot tell a local-only delegate from a missing one;
+				// the real reason goes to the server log only. Class-factory, interface-factory, and
+				// client-raise delegates are never in the registry and are served as before.
+				var requestedDelegateType = serviceProvider.GetRequiredService<IServiceAssemblies>()
+					.FindType(portalRequest.DelegateFullName ?? string.Empty);
+				if (requestedDelegateType != null && LocalOnlyDelegateRegistry.IsLocalOnly(requestedDelegateType))
+				{
+					log.RemoteRequestRefusedLocalOnly(correlationId, delegateTypeName);
+					throw new MissingDelegateException($"Cannot find delegate type {portalRequest.DelegateFullName} in the registered assemblies");
+				}
+
+				trace.TraceDeserializingRequest(correlationId, delegateTypeName);
+				var deserializeSw = Stopwatch.StartNew();
+				var remoteRequest = serializer.DeserializeRemoteDelegateRequest(portalRequest);
+				deserializeSw.Stop();
+				var parameterCount = remoteRequest.Parameters?.Count ?? 0;
+				trace.TraceRequestDeserialized(correlationId, deserializeSw.ElapsedMilliseconds, parameterCount, remoteRequest.Target != null);
+				log.RemoteRequestDeserialized(correlationId, parameterCount);
+
+				ArgumentNullException.ThrowIfNull(remoteRequest.DelegateType, nameof(remoteRequest.DelegateType));
+
+				trace.TraceResolvingDelegate(correlationId, remoteRequest.DelegateType.Name);
+				var method = (Delegate)serviceProvider.GetRequiredService(remoteRequest.DelegateType);
+
+				// Prepare parameters, injecting CancellationToken if the method expects it
+				var methodParams = method.Method.GetParameters();
+				var invokeParams = PrepareInvokeParameters(remoteRequest.Parameters, methodParams, cancellationToken);
+
+				trace.TraceInvokingDelegate(correlationId);
+				var invokeSw = Stopwatch.StartNew();
+				object? result;
+
+				// Entry-call tracking: this delegate invocation is the entry factory call for
+				// every remote request — [Remote] factory methods and client-raised events
+				// alike. Generated Local* methods nest inside it (depth > 1), so the drain
+				// happens here, once, at the outermost completion. The drain sits BEFORE the
+				// post-invoke cancellation check and before relay collection: a token
+				// cancelled after the delegate succeeded must neither skip the drain nor
+				// abort it, and events raised by drained handlers must join this response's
+				// relay batch. Failure paths (throw, forbid, cancellation during the
+				// delegate) discard the deferred work — a clear, never a drain.
+				// The relay batch is this call's alone. A scope can serve more than one call
+				// (ASP.NET gives each request its own; an in-process host may not), and the
+				// collector is scoped: without this, a response would re-send an earlier
+				// call's events, or a failed call's, which had no response to carry them.
+				var collector = serviceProvider.GetService<IFactoryEventCollector>();
+				collector?.Clear();
+
+				var phaseScheduler = serviceProvider.GetService<IFactoryEventPhaseScheduler>();
+				phaseScheduler?.BeginEntryCall();
+				try
+				{
+					try
+					{
+						result = method.DynamicInvoke(invokeParams);
+					}
+					catch (TargetInvocationException tie) when (tie.InnerException != null)
+					{
+						// Unwrap the TargetInvocationException from DynamicInvoke
+						System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(tie.InnerException).Throw();
+						throw; // Unreachable, but required by compiler
+					}
+
+					if (result is Task task)
+					{
+						trace.TraceAwaitingResult(correlationId);
+						await task;
+						invokeSw.Stop();
+						trace.TraceDelegateCompleted(correlationId, invokeSw.ElapsedMilliseconds, true);
+						// Only get result for Task<T>, not for non-generic Task (events, void methods)
+						var resultProperty = task.GetType().GetProperty(Result);
+						if (resultProperty != null && resultProperty.PropertyType != typeof(void) &&
+							resultProperty.PropertyType.Name != "VoidTaskResult")
+						{
+							result = resultProperty.GetValue(task);
+						}
+						else
+						{
+							result = null;
+						}
+					}
+					else
+					{
+						invokeSw.Stop();
+						trace.TraceDelegateCompleted(correlationId, invokeSw.ElapsedMilliseconds, false);
+					}
+
+					if (phaseScheduler != null)
+					{
+						await phaseScheduler.EndEntryCallAsync(success: true);
+					}
+				}
+				catch
+				{
+					if (phaseScheduler != null)
+					{
+						await phaseScheduler.EndEntryCallAsync(success: false);
+					}
+
+					throw;
+				}
+
+				// Check for cancellation before serializing response
+				cancellationToken.ThrowIfCancellationRequested();
+
+				// This is the return type the client is looking for
+				// If it is an Interface - match the interface
+				// Was having issues with the FactoryGenerator when this was returning the concrete type
+				// instead of the interface with the concrete type specific in the JSON
+
+				var returnType = method.GetMethodInfo().ReturnType;
+
+				// Handle Task<T> return types - extract the inner type
+				// For non-generic Task (events) or void, serialize null with object type
+				if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
+				{
+					returnType = returnType.GetGenericArguments()[0];
+				}
+				else if (returnType == typeof(Task) || returnType == typeof(void))
+				{
+					// For non-generic Task (events) or void methods, serialize null as object
+					result = null;
+					returnType = typeof(object);
+				}
+
+				// Collect relayed events (if any were captured during this operation)
+				List<RelayedFactoryEvent>? relayedEvents = null;
+				if (collector != null)
+				{
+					var collected = collector.GetCollectedEvents();
+					if (collected.Count > 0)
+					{
+						relayedEvents = new List<RelayedFactoryEvent>(collected.Count);
+						foreach (var evt in collected)
+						{
+							relayedEvents.Add(new RelayedFactoryEvent
+							{
+								TypeFullName = evt.GetType().FullName!,
+								Json = serializer.Serialize(evt, evt.GetType()) ?? "{}"
+							});
+						}
+					}
+				}
+
+				trace.TraceSerializingResponse(correlationId, returnType.Name);
+				var serializeSw = Stopwatch.StartNew();
+				var portalResponse = new RemoteResponseDto(serializer.Serialize(result, returnType), relayedEvents);
+				serializeSw.Stop();
+				trace.TraceResponseSerialized(correlationId, serializeSw.ElapsedMilliseconds);
+
+				sw.Stop();
+				log.RemoteRequestCompleted(correlationId, delegateTypeName, sw.ElapsedMilliseconds);
+
+				return portalResponse;
+			}
+			catch (OperationCanceledException)
+			{
+				sw.Stop();
+				log.RemoteRequestCancelled(correlationId, delegateTypeName);
+				throw;
+			}
+			catch (AspForbidException)
+			{
+				sw.Stop();
+				log.RemoteRequestForbidden(correlationId, delegateTypeName);
+				// context.Forbid() have already been called
+				return new RemoteResponseDto(string.Empty);
+			}
+			catch (NotAuthorizedException ex)
+			{
+				// A refusal, not a failure: the host answers it as a denial the client
+				// rethrows (UseDTZero's endpoint, #10), so it is not logged as an error.
+				sw.Stop();
+				log.RemoteRequestNotAuthorized(correlationId, delegateTypeName, ex.Message);
+				throw;
+			}
+			catch (Exception ex) when (ex is not AspForbidException)
+			{
+				sw.Stop();
+				log.RemoteRequestFailed(correlationId, delegateTypeName, ex.Message, ex);
+				throw;
+			}
+		};
+	}
+}
+
+
+[Serializable]
+public class AspForbidException : Exception
+{
+	public AspForbidException() { }
+	public AspForbidException(string message) : base(message) { }
+	public AspForbidException(string message, Exception inner) : base(message, inner) { }
+}

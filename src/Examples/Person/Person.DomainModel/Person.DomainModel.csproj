@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	  <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+	  <CompilerGeneratedFilesOutputPath>Generated</CompilerGeneratedFilesOutputPath>
+	  <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Person.DomainModel.UnitTests" />
+		<Compile Remove="$(CompilerGeneratedFilesOutputPath)/**/*.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.EntityFrameworkCore" PrivateAssets="all" />
+	</ItemGroup>
+	
+	<ItemGroup>
+	  <ProjectReference Include="..\..\..\Generator\Generator.csproj" OutputItemType="Analyzer" />
+	  <ProjectReference Include="..\..\..\DTZero\DTZero.csproj" />
+	  <ProjectReference Include="..\Person.Ef\Person.Ef.csproj" PrivateAssets="all" />
+	</ItemGroup>
+	
+	<Target Name="PreBuild" BeforeTargets="PreBuildEvent">
+		<RemoveDir Directories="$(CompilerGeneratedFilesOutputPath)" />
+	</Target>
+	
+</Project>

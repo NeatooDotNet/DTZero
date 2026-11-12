@@ -1,0 +1,449 @@
+# IL Trimming
+
+DTZero lets you write `[Remote]` methods that take server-only services like `DbContext` and your repositories, so the persistence code sits beside the domain object it loads and saves. But when that domain assembly ships to the browser in Blazor WASM, three problems emerge:
+
+1. **Runtime failures.** Blazor WASM publishes with trimming by default. The trimmer sees Entity Framework Core referenced in your assembly, partially strips its internals, and EF crashes at runtime — even though the client never calls those code paths.
+
+2. **Intellectual property exposure.** Your `[Remote]` method bodies — SQL queries, data access, mapping to storage — ship to the browser in decompilable IL. Anyone with a disassembler can read your server-side persistence code.
+
+3. **Bundle bloat.** Server-only packages and their transitive dependencies inflate the download size, even though the client never executes them.
+
+The traditional workaround is splitting your domain into separate client and server assemblies. That works, but it adds project complexity and fights the single-assembly model that makes DTZero productive.
+
+DTZero solves all three problems with **feature switch guards**. The source generator wraps server-only code paths in `if (DTZeroRuntime.IsServerRuntime)` checks. When you configure your Blazor WASM project to set this switch to `false`, the IL trimmer treats the guarded branches as dead code and removes them entirely — method bodies, server-only types, and their transitive dependencies all disappear from the published output. EF Core, repository implementations, helper classes — gone cleanly, no partial trimming, no runtime crashes.
+
+## How It Works
+
+DTZero's source generator emits `if (DTZeroRuntime.IsServerRuntime)` guards around server-only code. Which methods get guards depends on method visibility:
+
+### Class Factories — Conditional Guards
+
+Not all factory methods get guards. The generator uses the developer's `public` vs `internal` declaration and the presence of `[Remote]` to decide:
+
+| Method Declaration | Guard? | Trimming Behavior |
+|---|---|---|
+| `[Remote] internal` | Yes | Method body trimmed. Client routes to server via delegate fork. Promoted to `public` on factory interface. |
+| `public` (no `[Remote]`) | **No** | Method body **survives** trimming. Runs locally on both client and server. |
+| `internal` (no `[Remote]`) | Yes | Method body trimmed. Server-only. |
+| `[Remote] public static` `[Execute]` | Yes | Method body trimmed. Class-level Execute is `public static` by convention and exempt from NF0105 — `[Remote]` alone drives the guard. |
+| `public static` `[Execute]` (no `[Remote]`) | **No** | Method body **survives** trimming. Runs on whichever tier resolves the factory, with that tier's services. |
+| `internal static` `[Execute]` (no `[Remote]`) | Yes | Method body trimmed. Server-only, like any `internal` operation; carried on the factory interface with the `internal` modifier. |
+
+`[Remote]` requires `internal` on instance methods — `[Remote] public` is a compile-time error (NF0105); static methods are exempt, because `[Remote]` alone decides their guard. The `[Remote] internal` pattern enables IL trimming: the trimmer eliminates the method bodies, `[Service]` dependencies, and transitive references from the published output, while the generated factory interface exposes the method as `public` for clients to call.
+
+`public` non-`[Remote]` methods like `Create(string name)` or `CanCreate()` have no guard because they are designed to run on the client. Marking child entity factory methods as `internal` (without `[Remote]`) also makes them trimmable.
+
+### Static, Interface, and Event Handler Factories
+
+- **Static factories** — `[Execute]` obeys `[Remote]`. A `[Remote, Execute]` delegate's local registration is guarded: the trimmer removes the registration lambda, its captured dependencies, and the method body itself. A bare `[Execute]` gets one unguarded local registration and no remote delegate, so its body **ships to the client and runs there** — that is its purpose, and the gate asserts it present. Removal requires the generated forwarding holder described under [Factory Type Preservation](#factory-type-preservation) — without it the registrar attribute names your static class and the trimmer preserves every method on it, bodies included. Both halves — `[Remote]` body absent, bare body present and running — are measured in `DTZero.TrimmingTests`, on the static and the class-level shape.
+- **`[FactoryEventHandler<T>]` classes** — handler registrations are guarded, and the handler bodies plus their `[Service]` dependencies are removed. Same holder mechanism, same reason.
+- **Interface factories** — Local method bodies throw `InvalidOperationException` when `IsServerRuntime` is `false`. Whether that makes the server-only code path unreachable to the trimmer is **not established** for this shape: the guard sits inside the method, which for `async` operations is not sufficient on its own (see *Async `Local*` emission*), and the leg still names `{ImplName}Factory` in its registrar attribute rather than a single-method holder. No leak has been observed, but the leg reaches its implementation through interfaces, so a client-side trimmed test reads "absent" either way and cannot prove elimination. Treat it as unverified rather than guaranteed.
+
+The key insight: the guards are in DTZero's **generated** code, not in your application code. You don't need to modify your domain model at all.
+
+### The Feature Switch
+
+`DTZeroRuntime.IsServerRuntime` uses .NET's `[FeatureSwitchDefinition]` attribute. At runtime, it reads from `AppContext` and defaults to `true` (server behavior). But when you set it via `RuntimeHostConfigurationOption` with `Trim="true"`, the IL trimmer treats it as a compile-time constant and folds it into the binary. All code behind the `false` branch is eliminated.
+
+```
+Published without trimming          Published with trimming
+─────────────────────────           ──────────────────────
+Domain assembly                     Domain assembly
+├── Employee                        ├── Employee
+│   ├── Validate()                  │   ├── Validate()
+│   ├── [Remote] Fetch()            │   └── (factory stubs only)
+│   ├── [Remote] Insert()           │
+│   └── [Remote] Update()           │
+├── EmployeeRepository              ├── (removed)
+├── EmployeeDbContext                ├── (removed)
+└── EF Core references              └── (removed)
+```
+
+## Prerequisite: Direct `DTZero` Reference in Every Project with Factory Types
+
+Roslyn source generators only run in a project when the generator package (or analyzer reference) is resolved **directly**, not transitively. If a project declares any of the following — `[Factory]`, `[FactoryEventHandler<T>]`, `[Execute]`, `[AuthorizeFactory<T>]` — it **must** have its own `PackageReference` to `DTZero`:
+
+```xml
+<PackageReference Include="DTZero" Version="x.y.z" />
+```
+
+Relying on a transitive flow (e.g. a `ProjectReference` to a domain project that references `DTZero`, or a `PackageReference` with `PrivateAssets="all"`) will silently skip code generation for that project. The symptoms are specific and easy to misdiagnose:
+
+- `FactoryServiceRegistrar` is never emitted for types in the project — nothing gets registered into DI, nothing gets registered into `DtoConstructorRegistry`, and server-side `[FactoryEventHandler<T>]` handlers declared in that project are never registered with `FactoryEventHandlerRegistry`.
+- Factories appear to work in one project and fail in another that depends on the first.
+- Server-raised events still reach the wire, but server-side handlers declared in the affected project never fire.
+
+Client-side event reception is unaffected by this issue — the consumer-implemented `IFactoryEventRelay` is discovered by plain DI, not by the generator.
+
+This applies to **every** project that declares factory types, including a Blazor WASM client project that declares any of them. The only projects that may rely on a transitive reference are those that purely *consume* factories (inject the interface, call methods) without declaring any factory types themselves.
+
+## Configuration
+
+### Step 1: Mark your domain assembly as trimmable
+
+In your **domain model project** `.csproj`:
+
+```xml
+<PropertyGroup>
+  <IsTrimmable>true</IsTrimmable>
+</PropertyGroup>
+```
+
+This tells the trimmer your assembly is safe to trim. Without it, the trimmer only trims framework assemblies and your domain model ships to the client intact — with all server-only code and dependencies.
+
+The library author declares trimmability once, rather than every consuming client project needing to add `<TrimmableAssembly>` entries.
+
+### Step 2: Configure the client project
+
+In your **Blazor WASM client project** `.csproj`:
+
+```xml
+<ItemGroup>
+  <RuntimeHostConfigurationOption Include="DTZero.IsServerRuntime"
+                                   Value="false"
+                                   Trim="true" />
+</ItemGroup>
+```
+
+Blazor WASM projects already publish with trimming enabled (`PublishTrimmed=true` is the SDK default). The `RuntimeHostConfigurationOption` tells the trimmer to treat `IsServerRuntime` as `false`, enabling dead code elimination of server-only code paths.
+
+### Step 3: Isolate server-only dependencies with `PrivateAssets="all"`
+
+Your domain model often references server-only packages (like EF Core) and server-only projects (like a data access layer). Without intervention, these flow as transitive dependencies to the client project — the trimmer then has to deal with assemblies it may not be able to trim cleanly, causing warnings or runtime failures.
+
+Mark server-only references with `PrivateAssets="all"` in your **domain model project** `.csproj` to prevent transitive flow:
+
+```xml
+<!-- Server-only packages -->
+<PackageReference Include="Microsoft.EntityFrameworkCore" PrivateAssets="all" />
+
+<!-- Server-only project references -->
+<ProjectReference Include="..\Person.Ef\Person.Ef.csproj" PrivateAssets="all" />
+```
+
+`PrivateAssets="all"` means these dependencies are available at compile time (so your domain code can reference EF Core types and repository implementations) but they are **not** forwarded to projects that reference your domain model. The server project references both the domain model and the data access layer directly, so it gets everything it needs.
+
+### Step 4: Mark residual assemblies as trimmable in the client
+
+Some assemblies may still end up in the client output through indirect paths — for example, if the build resolves them as transitive dependencies despite `PrivateAssets="all"` on the primary path. These assemblies are not marked `IsTrimmable` themselves, so the trimmer leaves them intact by default.
+
+Add `<TrimmableAssembly>` entries in your **client project** `.csproj` to tell the trimmer it is safe to trim them:
+
+```xml
+<ItemGroup>
+  <TrimmableAssembly Include="Person.Ef" />
+  <TrimmableAssembly Include="DTZero.Generator" />
+</ItemGroup>
+```
+
+- **`Person.Ef`** — The data access layer. Even with `PrivateAssets="all"` on the domain model's project reference, the build may resolve it through other dependency paths. Marking it trimmable ensures it gets stripped from the published client.
+- **`DTZero.Generator`** — The DTZero source generator assembly. It runs at compile time only, but its output assembly may appear in the client output. Marking it trimmable removes it from the published binary.
+
+### What Each Setting Does
+
+| Setting | Where | Purpose |
+|---------|-------|---------|
+| `IsTrimmable=true` | Domain `.csproj` | Opts the assembly into trimming |
+| `RuntimeHostConfigurationOption` | Client `.csproj` | Tells the trimmer to treat `IsServerRuntime` as `false` at compile time |
+| `PrivateAssets="all"` | Domain `.csproj` | Prevents server-only dependencies from flowing transitively to client |
+| `TrimmableAssembly` | Client `.csproj` | Marks residual assemblies as safe to trim even though they lack `IsTrimmable` |
+
+The `Trim="true"` on the `RuntimeHostConfigurationOption` is critical — without it, the switch is just a runtime value and the trimmer can't use it for dead code elimination.
+
+**`TrimMode` needs no setting.** Blazor WASM publishes with `TrimMode=partial`, which trims only the assemblies marked `IsTrimmable`. Step 1 marks the domain assembly, and that is what lets the trimmer remove its server-only code. Under `partial`, a domain assembly without `IsTrimmable` keeps all of it. `TrimMode=full` also removes it, because it trims every assembly. DTZero's trimming gate publishes its test harness at `partial` with `IsTrimmable=true`.
+
+### Complete Example
+
+Here are all three project files showing the full trimming configuration, based on the [Person example](https://github.com/NeatooDotNet/DTZero/tree/main/src/Examples/Person):
+
+**Domain Model (`Person.DomainModel.csproj`):**
+```xml
+<PropertyGroup>
+  <IsTrimmable>true</IsTrimmable>
+</PropertyGroup>
+
+<ItemGroup>
+  <!-- Server-only packages: PrivateAssets="all" prevents transitive flow to client -->
+  <PackageReference Include="Microsoft.EntityFrameworkCore" PrivateAssets="all" />
+</ItemGroup>
+
+<ItemGroup>
+  <!-- Server-only project references: same treatment -->
+  <ProjectReference Include="..\Person.Ef\Person.Ef.csproj" PrivateAssets="all" />
+</ItemGroup>
+```
+
+**Client (`Person.Client.csproj`):**
+```xml
+<ItemGroup>
+  <!-- Tell trimmer IsServerRuntime is false at compile time -->
+  <RuntimeHostConfigurationOption Include="DTZero.IsServerRuntime"
+                                   Value="false"
+                                   Trim="true" />
+  <!-- Mark additional assemblies as trimmable -->
+  <TrimmableAssembly Include="Person.Ef" />
+  <TrimmableAssembly Include="DTZero.Generator" />
+</ItemGroup>
+```
+
+**Server (`Person.Server.csproj`):**
+```xml
+<!-- No trimming configuration needed — server runs everything.
+     The server references both the domain model and data access layer directly. -->
+<ItemGroup>
+  <ProjectReference Include="..\Person.DomainModel\Person.DomainModel.csproj" />
+  <ProjectReference Include="..\Person.Ef\Person.Ef.csproj" />
+  <ProjectReference Include="..\Person.Client\Person.Client.csproj" />
+</ItemGroup>
+```
+
+### Requirements
+
+- **.NET 9 or later** — `[FeatureSwitchDefinition]` was introduced in .NET 9
+- **`dotnet publish`** — Trimming only runs during publish, not during `dotnet build` or `dotnet run`
+
+## Verifying Trimming Results
+
+After publishing, you can verify that server-only types were removed:
+
+```bash
+# Publish with trimming
+dotnet publish -c Release
+
+# Search for server-only type names in the output assembly
+# (should return no matches)
+grep -aob "YourRepositoryClassName" bin/Release/net9.0/publish/YourApp.dll
+
+# Or use ILSpy for detailed inspection
+ilspycmd bin/Release/net9.0/publish/YourApp.dll
+```
+
+**Grepping for a string literal needs a second step.** Type and method *names* are UTF-8 in the assembly's metadata, so `grep -a` finds them. String *literals* from method bodies are UTF-16, so `grep -a` never matches them and reports "absent" for text that is demonstrably in the file. If you are looking for a literal — a connection string fragment, a SQL keyword, a distinctive message — strip the null bytes first:
+
+```bash
+# Literals: collapse UTF-16 to ASCII before searching
+tr -d '\000' < bin/Release/net9.0/publish/YourApp.dll | grep -c "SELECT * FROM"
+```
+
+Verify your check can actually find things before trusting a clean result: run it against the **non-published** build output, where the server-only code definitely still exists. If it reports "absent" there too, the check is broken, not the code.
+
+If server-only type names still appear in the output, check that:
+1. The domain assembly has `IsTrimmable=true` (Step 1). Under Blazor WASM's default `TrimMode`, `partial`, an assembly without it is not trimmed at all
+2. The `RuntimeHostConfigurationOption` has `Trim="true"`
+3. You're inspecting the `publish/` output, not the `build/` output
+
+## Factory Type Preservation
+
+All factory types — class, static, and interface — are automatically preserved from trimming. The source generator emits `[assembly: DTZeroFactoryRegistrar(typeof(X))]` for every factory, creating a static reference that the IL trimmer follows. The `DTZeroFactoryRegistrarAttribute` carries `[DynamicallyAccessedMembers]` annotations that instruct the trimmer to preserve **all methods on the referenced type, method bodies included**.
+
+That last part is why the attribute never names your own class. Preserving every method on a type means preserving what those methods *do*, so if the attribute named your class, your `[Remote]` method bodies would be preserved along with it — the opposite of the guarantee above.
+
+Three of the four shapes emit a tiny holder whose only member forwards to the real registrar, for two different reasons. Static factories and `[FactoryEventHandler<T>]` classes have no separate generated type at all — the generator re-opens your own partial class to host `FactoryServiceRegistrar`, so naming the attribute's target at your class would preserve your bodies. Class factories *do* have a generated `{X}Factory`, but it hosts every `Local*` method, so naming it preserved all of those bodies instead. Interface factories still name `{ImplName}Factory` (see the note below the table). For a static factory `MyCommands`, the holder is a generated `internal static class DTZeroFactoryRegistrar_MyCommands` whose one method, `FactoryServiceRegistrar(IServiceCollection services, DTZeroFactory remoteLocal)`, calls `MyCommands.FactoryServiceRegistrar` with the same arguments.
+
+The attribute names the holder. Preservation then reaches exactly one forwarding method instead of everything on `MyCommands`.
+
+**Naming a generated type is necessary, not sufficient.** What makes a holder safe is that it has exactly *one* method. A generated type that hosts many methods still has all of them preserved, bodies included — `{X}Factory` hosts every `Local*` method for its factory, which is why class factories emit a holder too (`DTZeroClassFactoryRegistrar_{ClassName}`) rather than naming the factory directly.
+
+The `IsServerRuntime` guard inside each `Local*` method does the other half of the work. For `async` operations that guard is emitted in a **non-async wrapper** that forwards to a private core. For an async Fetch, the generated `LocalFetch` is a plain `Task`-returning method: it throws `InvalidOperationException("Server-only method called in non-server runtime.")` when `DTZeroRuntime.IsServerRuntime` is `false`, and otherwise returns `LocalFetchCore(...)`, the `async` method that holds the body. Design's generated factories (`Design.Domain/Generated`, after a build) show the shape.
+
+Inside an `async` method the compiler lowers the whole body — guard included — into the state machine's `MoveNext`, within the builder's own protected region. The trimmer folds the feature switch there but does not eliminate the unreachable remainder, so the body survives. A synchronous method puts the guard ahead of any protected region, which is why sync operations always trimmed correctly and `async` ones did not until v1.7.0.
+
+**Behaviour change in v1.7.0:** the guard throws synchronously from the wrapper rather than surfacing as a faulted `Task`. Awaiting callers are unaffected. Whether it reaches *your* call site synchronously depends on the entry point — non-async entry points (most reads) propagate it; `async` ones (`Save` on an authorized factory) capture it back into a faulted `Task`. Authorization failures, target casts, and DI resolution failures still surface as faulted tasks in every case — only the server-only guard moved.
+
+At startup, `AddDTZero()` and `AddDTZeroAspNetCore()` discover factory types by enumerating these assembly attributes rather than scanning all types via reflection. This means factory registration is fully trimming-safe — no factory types are lost during IL trimming, regardless of whether they are class factories, static factories, or interface factories.
+
+You do not need to take any action to preserve your factory types. This is handled automatically by the generator.
+
+## Authorization Types and Trimming
+
+DTZero's generator automatically emits explicit DI registrations for `[AuthorizeFactory<T>]` types in the generated `FactoryServiceRegistrar`. This creates static references that the IL trimmer preserves — your auth classes survive trimming without any additional configuration.
+
+For example, if your factory uses `[AuthorizeFactory<IPersonModelAuth>]`, the generator emits `services.TryAddTransient<IPersonModelAuth, PersonModelAuth>()` in the generated registration code. The concrete type is discovered by the generator at compile time using the naming convention (`IPersonModelAuth` → `PersonModelAuth`).
+
+### RegisterMatchingName and Trimming
+
+`RegisterMatchingName` uses `assembly.GetTypes()` reflection to discover services at runtime. The IL trimmer cannot see these runtime-only references and may trim types that are only registered through this convention.
+
+**Factory auth types are handled automatically** by the generator (see above). For other services registered via `RegisterMatchingName`, you have two options if they get trimmed:
+
+1. **Explicit registration** — Register the service directly in your DI setup instead of relying on convention discovery.
+2. **`[DynamicDependency]`** — Apply this attribute to preserve specific types from trimming. See [Microsoft's documentation on preserving dependencies](https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/prepare-libraries-for-trimming#dynamicdependency).
+
+## DTO Return Type Preservation
+
+Plain DTO classes returned by factory methods are automatically preserved from trimming. When your domain assembly has `IsTrimmable=true`, the IL trimmer strips constructor and property metadata from types that aren't directly referenced in compiled code. This breaks `System.Text.Json` deserialization — `DefaultJsonTypeInfoResolver` uses reflection to discover constructors and properties, and that reflection fails when the metadata has been trimmed away.
+
+Normal Blazor WASM apps don't hit this because their assemblies aren't trimmed — `TrimMode=partial` only trims assemblies explicitly marked `IsTrimmable=true`. DTZero intentionally marks domain assemblies as trimmable to remove server-only persistence code from the client. DTOs returned through factory methods cross the client-server boundary via JSON serialization, so they must survive trimming intact.
+
+### How DTZero Handles It
+
+The source generator discovers DTO types in factory method signatures at compile time — return types **and** non-service parameters — and emits one of two preservation calls per discovered type, chosen by constructor shape:
+
+- **Public parameterless constructor** → `DtoConstructorRegistry.Register<T>(() => new T())`. The registered lambda replaces reflection-based construction at deserialization time.
+- **Only parameterized public constructors** (positional records) → `DtoConstructorRegistry.PreserveType<T>()`. No constructor lambda is registered; deserialization flows through `RecordBypassConverterFactory`, and the call exists purely to root the type for the trimmer.
+
+Both calls carry `[DynamicallyAccessedMembers(All)]` on the generic parameter, which tells the trimmer to preserve the entire type — constructors, properties, and all metadata that `System.Text.Json` needs for deserialization.
+
+This covers all factory patterns:
+
+- **Interface Factory methods** — e.g. Design's `IProductCatalog`, whose `Task<ProductListing?>` and `Task<IReadOnlyList<ProductListing>>` return types are discovered
+- **Class Factory `[Execute]` methods** — DTO return types are discovered and preserved
+- **Static Factory `[Execute]` methods** — same treatment
+
+The generator unwraps `Task<T>`, nullable `T?`, arrays, and every generic collection to find the DTO types inside — recursively, and taking both the key and the value type of a dictionary. [What the walk reaches](#what-the-walk-reaches) states the full rule.
+
+### What Qualifies as a DTO
+
+Not every signature type needs this treatment. The generator preserves a discovered type when it:
+
+- Has at least one public constructor (parameterless → `Register<T>`; parameterized-only, e.g. positional records → `PreserveType<T>`)
+- Is **not** a `[Factory]`-annotated type (the factory's DI registration keeps its constructors, and its ordinal converter or `PreserveProperties<T>()` keeps its properties)
+- Is **not** a primitive, string, or framework type
+- Is **not** abstract or an interface
+
+### What You Need to Know
+
+If you return or accept a plain DTO class **or a positional record** through any factory method, it is automatically trimming-safe. You do not need to take any action.
+
+**Nested DTOs are automatically discovered.** The generator recursively walks the public instance members (including inherited ones) of each discovered DTO type — classes and records alike — to find nested DTOs that also need preservation. Members means properties with a getter **and public fields**: `DTZeroJsonSerializer` runs with `IncludeFields = true`, so public fields are on the wire. The same eligibility criteria and bucket rule apply to nested DTOs as to direct signature types. Cycle detection prevents infinite recursion from circular references.
+
+**DTOs carried as `[Factory]` entity members are automatically discovered.** Every class carrying `[Factory]` directly also walks its own public members (inherited ones included) during generation and emits preservation for reachable DTOs in its own `FactoryServiceRegistrar` — so a DTO or record that only rides on an aggregate (never appearing in a factory method signature itself) is still trimming-safe. The entity itself is never treated as a DTO (its own registrar preserves it, as [What Keeps the Flags](#what-keeps-the-flags) describes), and entity-typed members are not walked by the *parent* — each `[Factory]` class's own registrar covers its own graph. An entity's public fields are walked as well as its properties: in the default `Ordinal` format an entity carries properties only, but in `Named` format — and always, for an entity whose constructor takes required parameters — it goes through the reflection serializer and its public fields cross the wire.
+
+For example, if a factory method returns `ParentDto` which has a `List<ChildDto> Children` property, both `ParentDto` and `ChildDto` are automatically registered — no additional action is needed. Likewise, if an `[Execute]`-opened aggregate carries a `Banner` record property, the record is preserved through the aggregate's own registrar, and if an entity carries a `Dictionary<string, LocationDto>`, `LocationDto` is preserved the same way.
+
+### What the walk reaches
+
+Every type the walk meets is unwrapped to the types the serializer will construct for it:
+
+- `Task<T>` on a factory method's return type, and nullable `T?` at any level.
+- Arrays and every generic collection type — a generic type implementing `IEnumerable<T>` — recursively, so `List<List<T>>` and `Dictionary<string, List<T>>` both reach `T`.
+- Both the key and the value type of every generic dictionary — `Dictionary`, `IDictionary`, `IReadOnlyDictionary`, and the sorted, concurrent, immutable, and custom generic dictionaries. A dictionary enumerates `KeyValuePair<TKey, TValue>`, and both halves are on the wire.
+- A generic collection type of your own, such as `PagedList<T> : List<T>`, **and** its element type. The serializer constructs both.
+
+Each type reached this way is preserved if it qualifies as a DTO, and its own members are walked in turn. Before v1.10.1 the walk reached neither dictionary keys and values, nor public fields, nor the element of a collection nested inside another collection.
+
+### What the walk does not reach
+
+The walk follows only what the compiler can see. A DTO reachable **only** through one of these shapes is never preserved automatically:
+
+| Shape | Why the walk stops |
+|---|---|
+| A member typed as an interface or abstract class, when the concrete type is a plain DTO rather than a `[Factory]` type | The concrete type is chosen at runtime from the `$type` discriminator, so no static walk can know it |
+| A tuple element, such as `(LocationDto Location, int Rank)` | Tuples are `System` types |
+| A non-generic collection subclass, such as `class Locations : List<LocationDto>` | The subclass itself is preserved, but its element type is not reached |
+| A value typed `object` | There is no static type to follow |
+| A DTO that reaches the client only through your own HTTP or JSON code | It never flows through a factory, an entity, or an event |
+
+Preserve such a type in your client's `LinkerConfig.xml`:
+
+```xml
+<linker>
+  <assembly fullname="YourApp.Domain">
+    <type fullname="YourApp.Domain.LocationDto" preserve="all" />
+  </assembly>
+</linker>
+```
+
+or register it in client DI setup, which is exactly what the generator would have emitted: `DtoConstructorRegistry.Register<LocationDto>(() => new LocationDto())` for a type with a public parameterless constructor, or `DtoConstructorRegistry.PreserveType<PriceBreakdown>()` for a positional record (both in `DTZero.Internal`).
+
+See also [Microsoft's documentation on preserving dependencies](https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/prepare-libraries-for-trimming#dynamicdependency). One deliberate boundary: a class that merely *implements* a `[Factory]` interface — an interface-factory service implementation — gets no member walk; those are stateless services, not serialized state.
+
+### Upgrading across v1.7.0
+
+Before v1.7.0, async `[Remote]` method bodies shipped to trimmed clients (see [Factory Type Preservation](#factory-type-preservation)), so any `new T()` inside one rooted `T`'s constructor on the client as a side effect. v1.7.0 removed those bodies, and the accidental root went with them.
+
+A DTO whose only construction site is inside an async `[Remote]` body, and which the walk does not reach, can therefore work on a client built with v1.6.x or earlier and fail after upgrading. The failure is a `NotSupportedException` — "Deserialization of types without a parameterless constructor…" — which a Blazor WebAssembly build reports as `DeserializeNoConstructor`, because it uses resource keys. Until v1.10.1 that included every DTO reachable only as a dictionary key or value, or only through a public field. Before publishing an upgraded client, check any such type against [What the walk does not reach](#what-the-walk-does-not-reach) and preserve it explicitly, or move to v1.10.1 or later for the dictionary and field shapes.
+
+## Factory Event Type Preservation
+
+Event records raised via `IFactoryEvents.Raise<T>()` and handled by `[FactoryEventHandler<T>]` classes (server) or `IFactoryEventRelay` (client) cross the client/server boundary via JSON — both when the server relays captured events back to the client in `RemoteResponseDto.RelayedEvents` and when a client raises an event that a server handler processes. Like DTO return types, event records must survive IL trimming intact.
+
+### How DTZero Handles It
+
+The source generator discovers every concrete `FactoryEventBase` descendant declared in a compilation and emits a per-assembly event-preservation registrar — a generated static class registered via the same assembly-level `[DTZeroFactoryRegistrar]` mechanism as factory registrars, invoked automatically by `AddDTZero`. The registrar emits `DtoConstructorRegistry.PreserveType<T>()` for each event record (and `Register<T>` / `PreserveType<T>` for the DTOs reachable through each event's property graph, bucketed by constructor shape like every other discovered DTO).
+
+Declaring the event is all it takes. For Design's shipping event, the generated registrar preserves both `OrderShippedEvent` and the `ShippingAddress` it carries:
+
+<!-- snippet: trimming-event-nested-record -->
+<a id='snippet-trimming-event-nested-record'></a>
+```cs
+public record ShippingAddress(string Street, string City, string PostalCode);
+
+/// <summary>
+/// Event object raised when an order ships. Demonstrates an event record with
+/// a nested record property — the generator automatically emits preservation
+/// for both <c>OrderShippedEvent</c> and <c>ShippingAddress</c> so the event
+/// round-trips correctly in IL-trimmed builds.
+/// </summary>
+public record OrderShippedEvent(Guid OrderId, ShippingAddress Address) : FactoryEventBase;
+```
+<sup><a href='/src/Design/Design.Domain/FactoryPatterns/FactoryEventHandlerPattern.cs#L164-L174' title='Snippet source file'>snippet source</a> | <a href='#snippet-trimming-event-nested-record' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+The `[FactoryEvent]` annotation on `FactoryEventBase` (inherited at runtime) remains what makes descendants discoverable by the `FactoryEventTypeRegistry` assembly scan. Its `[DynamicallyAccessedMembers]` annotation, however, does **not** preserve descendants' members under trimming — `DynamicallyAccessedMembers` does not flow from a base type to derived types in ILLink, which is exactly why the generator emission exists. (An earlier version of this page claimed the annotation alone made every descendant trimming-safe; a publish-trimmed repro proved that wrong for event records whose only reference is a generic subscription call site.)
+
+`IFactoryEvents.Raise<T>` retains `[DynamicallyAccessedMembers(All)]` on its generic parameter for producer-side call-site preservation.
+
+One boundary: the generated registrar is a separate file, so `private`/`protected`/file-scoped nested event records cannot be preserved this way and are skipped. Declare wire-crossing events as top-level (or `internal`/`public` nested) types.
+
+### What You Need to Know
+
+Any accessible record inheriting `FactoryEventBase` is automatically trimming-safe — no manual `DtoConstructorRegistry` calls, no `[FactoryEventHandler<T>]` required, no consumer-side annotation, nothing to configure. End-to-end verification lives in `src/Tests/DTZero.TrimmingTests/EventSubscribeOnlySmokeTest.cs` — a publish-trimmed check whose event record's only static reference is a generic `Subscribe<TEvent>` call site (the hardest shape: nothing else roots the type's members), plus the `EventRelaySmokeTest` round-trip.
+
+### Nested Reference Types in Event Records
+
+Automatically preserved. The generator walks each discovered event's public members — properties and fields — with the same bucketed walk used for factory-signature and entity DTOs: nested records land in the `PreserveType` bucket, parameterless DTOs in the `Register` bucket, collections, dictionary keys and values, and nullables are unwrapped as described in [What the walk reaches](#what-the-walk-reaches), and cycles are detected. No manual `DtoConstructorRegistry` calls are needed for types reachable from an event record's members, outside the shapes listed in [What the walk does not reach](#what-the-walk-does-not-reach).
+
+### User Code That Forwards `Raise<T>` Through a Generic Passthrough
+
+`IFactoryEvents.Raise<T>` and its implementations now carry `[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)]` on the `T` parameter. This is the mechanism that preserves `T` from the call site at every concrete `Raise<MyEvent>(...)` invocation.
+
+If your own code re-exposes `Raise` through a generic wrapper method, the compiler will now flag the wrapper with `IL2091` because the wrapper's `T` does not carry the same annotation:
+
+```csharp
+// WRONG - IL2091 under trimming: the wrapper's T lacks Raise<T>'s annotation
+public Task RelayAnyEvent<T>(T evt) where T : FactoryEventBase =>
+    _factoryEvents.Raise(evt);
+```
+
+Resolve it in one of two ways:
+- **Propagate the annotation:** put `[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)]` on the wrapper's own `T`.
+- **Close the generic at the boundary:** take a concrete event type, as in `RelayCheckoutCompleted(OrderCheckoutCompleted evt)`, which produces no warning.
+
+The warning fires only when user code forwards a generic `T` into `Raise<T>`. Direct calls with a concrete type (`_factoryEvents.Raise(new OrderCheckoutCompleted(...))`) are unaffected.
+
+## IFactorySaveMeta Preservation
+
+When an entity implements `IFactorySaveMeta`, its `IsNew` and `IsDeleted` properties must round-trip across the client/server boundary as JSON. Save routing happens server-side — the generated `LocalSave` reads `target.IsNew` and `target.IsDeleted` on the server-side deserialized instance. If either property drops out of the wire payload, the server deserializes them as default values (`IsNew = true` from the property initializer, `IsDeleted = false`), and **every Save routes to Insert regardless of the client's actual state**. Delete silently becomes a no-op.
+
+### What Keeps the Flags
+
+`IsNew` and `IsDeleted` are public `get; set;`, as [Save Operation — IFactorySaveMeta](save-operation.md#ifactorysavemeta) shows. Client code seldom reads both, and the library reads neither on the client, so on a trimmed client the generator's own code is what keeps their accessors:
+- **A `partial`, non-nested class whose constructors take no services** gets a generated ordinal converter. It reads and writes every serialized property, and it is registered for both formats.
+- **Any other class factory** has no ordinal converter: one whose constructor takes services, one that is not `partial`, or a nested one. Its registrar calls `DtoConstructorRegistry.PreserveProperties<T>()`, which keeps the class's public properties and fields, and nothing else, so `[Remote]` bodies still trim. Earlier versions emitted no such call, and a trimmed client wrote such a class as `{}` in both formats.
+
+Nothing in your code is needed: no `[JsonInclude]`, no `[DynamicDependency]`. The trimming harness pins the second path on a publish-trimmed client: `SaveMetaRoundTripSmokeTest` round-trips `IsNew = false` and `IsDeleted = true` through each format on a class whose constructor takes a service. On the first path, the generated converter's own reads and writes are what keep the accessors.
+
+A private setter does not work. The ordinal format skips a property whose setter the generated converter cannot call, a private one included, so a private-setter `IsNew` never crosses the wire in the default format, trimmed or not.
+
+### Verifying the Preservation
+
+After publishing, decompile the trimmed client-side DLL and confirm both accessors remain:
+
+```bash
+ilspycmd <YourClient>/obj/Release/net10.0/linked/<YourDomain>.dll -t Your.Namespace.Employee | grep "IsNew\|IsDeleted"
+```
+
+Both properties should be listed with a getter and a setter. A property shown with only a setter has lost its getter, and it is written as nothing.
+
+## Limitations
+
+- **Development builds are not trimmed.** `dotnet run` and `dotnet build` include all code. Trimming only applies to `dotnet publish` with `PublishTrimmed=true`. This is by design — you get full IntelliSense and debugging during development.
+- **Some DTO shapes are out of the generator's reach.** A DTO reachable only through an interface-typed member, a tuple, a non-generic collection subclass, or an `object` needs explicit preservation. See [What the walk does not reach](#what-the-walk-does-not-reach).
+- **Trimming warnings.** Your domain code or its dependencies may produce trimming warnings (e.g., reflection usage). These are standard .NET trimming concerns, not DTZero-specific. See [Microsoft's trimming documentation](https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/prepare-libraries-for-trimming) for guidance.
+
+## Next Steps
+
+- [Client-Server Architecture](client-server-architecture.md) — Understanding the `[Remote]` boundary that trimming leverages
+- [Factory Modes](factory-modes.md) — Runtime modes (Server, Remote, Logical)
+- [Getting Started](getting-started.md) — Initial project setup

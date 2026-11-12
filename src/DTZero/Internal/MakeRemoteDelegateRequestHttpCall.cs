@@ -1,0 +1,55 @@
+using System.Net.Http.Json;
+using Microsoft.Extensions.Logging;
+
+namespace DTZero.Internal;
+
+public delegate Task<RemoteResponseDto> MakeRemoteDelegateRequestHttpCall(RemoteRequestDto request, CancellationToken cancellationToken);
+
+public static class MakeRemoteDelegateRequestHttpCallImplementation
+{
+	public static MakeRemoteDelegateRequestHttpCall Create(HttpClient httpClient, ICorrelationContext correlationContext)
+	{
+		return Create(httpClient, correlationContext, null);
+	}
+
+	public static MakeRemoteDelegateRequestHttpCall Create(HttpClient httpClient, ICorrelationContext correlationContext, ILogger? logger)
+	{
+		return async (RemoteRequestDto request, CancellationToken cancellationToken) =>
+		{
+			var uri = new Uri(httpClient.BaseAddress!, "api/dtzero");
+			// Correlation ID should already be set by MakeRemoteDelegateRequest.EnsureCorrelationId()
+			var correlationId = correlationContext.CorrelationId ?? CorrelationContextImpl.GenerateCorrelationId();
+			var delegateTypeName = request.DelegateFullName ?? "unknown";
+
+			// Add correlation ID header for server-side tracing
+			using var httpRequest = new HttpRequestMessage(HttpMethod.Post, uri)
+			{
+				Content = JsonContent.Create(request, DTZeroTransportJsonContext.Default.RemoteRequestDto)
+			};
+			httpRequest.Headers.Add(CorrelationContextImpl.HeaderName, correlationId);
+
+			var response = await httpClient.SendAsync(httpRequest, cancellationToken);
+
+			// A refusal the server sent as a denial (#10): rethrown here as it was thrown there.
+			// A 403 without the header is someone else's, and fails as any other status does.
+			if (response.StatusCode == System.Net.HttpStatusCode.Forbidden
+				&& response.Headers.Contains(NotAuthorizedResponseDto.HeaderName))
+			{
+				var denial = await response.Content.ReadFromJsonAsync(DTZeroTransportJsonContext.Default.NotAuthorizedResponseDto, cancellationToken)
+					?? throw new HttpRequestException("Not-authorized response with an empty body.", null, response.StatusCode);
+				throw denial.ToException();
+			}
+
+			if (!response.IsSuccessStatusCode)
+			{
+				var issue = await response.Content.ReadAsStringAsync(cancellationToken);
+				logger?.RemoteCallFailed(correlationId, delegateTypeName, (int)response.StatusCode, null);
+				throw new HttpRequestException($"Failed to call DTZero. Status code: {response.StatusCode} {issue}", null, response.StatusCode);
+			}
+
+			var result = await response.Content.ReadFromJsonAsync(DTZeroTransportJsonContext.Default.RemoteResponseDto, cancellationToken) ?? throw new HttpRequestException($"Successful Code but empty response.");
+
+			return result;
+		};
+	}
+}

@@ -1,0 +1,70 @@
+using System.Collections.Generic;
+
+namespace DTZero.Generator.Model;
+
+/// <summary>
+/// Represents a delegate for static factory execute operations.
+/// </summary>
+internal sealed record ExecuteDelegateModel
+{
+    public ExecuteDelegateModel(
+        string name,
+        string delegateName,
+        string returnType,
+        bool isRemote,
+        bool isNullable = false,
+        IReadOnlyList<ParameterModel>? parameters = null,
+        IReadOnlyList<ParameterModel>? serviceParameters = null,
+        bool hasCancellationToken = false,
+        bool hasResult = true,
+        IReadOnlyList<AspAuthorizeCall>? aspAuthorize = null,
+        IReadOnlyList<AuthMethodCall>? authMethods = null)
+    {
+        Name = name;
+        DelegateName = delegateName;
+        ReturnType = returnType;
+        IsRemote = isRemote;
+        IsNullable = isNullable;
+        Parameters = parameters ?? System.Array.Empty<ParameterModel>();
+        ServiceParameters = serviceParameters ?? System.Array.Empty<ParameterModel>();
+        HasCancellationToken = hasCancellationToken;
+        HasResult = hasResult;
+        AspAuthorize = aspAuthorize ?? System.Array.Empty<AspAuthorizeCall>();
+        AuthMethods = authMethods ?? System.Array.Empty<AuthMethodCall>();
+    }
+
+    public string Name { get; }
+    public string DelegateName { get; }
+    public string ReturnType { get; }
+    /// <summary>
+    /// Whether the delegate is a client-to-server entry point. Derived from [Remote] (or a remote
+    /// authorization method / [AspAuthorize]) exactly as for class-factory methods — [Execute] is
+    /// no longer forced remote. A local-only delegate gets one unguarded registration in every
+    /// factory mode and no remote registration.
+    /// </summary>
+    public bool IsRemote { get; }
+    public bool IsNullable { get; }
+    public IReadOnlyList<ParameterModel> Parameters { get; }
+    public IReadOnlyList<ParameterModel> ServiceParameters { get; }
+    /// <summary>
+    /// Whether the domain method has a CancellationToken parameter.
+    /// </summary>
+    public bool HasCancellationToken { get; }
+    /// <summary>
+    /// False when the domain method returns non-generic <c>Task</c>: the delegate is declared
+    /// <c>Task</c> and the remote leg round-trips with no result. <see cref="ReturnType"/> is
+    /// not emitted in that case.
+    /// </summary>
+    public bool HasResult { get; }
+    /// <summary>
+    /// The method's [AspAuthorize] attributes. The local (server) registration checks them
+    /// with forbid before the method runs, so a refusal is a 403 to the remote caller (#5).
+    /// </summary>
+    public IReadOnlyList<AspAuthorizeCall> AspAuthorize { get; }
+    /// <summary>
+    /// The class's [AuthorizeFactory&lt;T&gt;] methods that match this [Execute]. The local registration
+    /// checks them before the method runs; a refusal throws NotAuthorizedException, as an
+    /// interface factory's does, because a delegate has no Authorized&lt;T&gt; to carry it back.
+    /// </summary>
+    public IReadOnlyList<AuthMethodCall> AuthMethods { get; }
+}

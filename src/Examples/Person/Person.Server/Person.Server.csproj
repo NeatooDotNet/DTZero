@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Inherits TargetFrameworks (net10.0), Nullable, and ImplicitUsings from Directory.Build.props -->
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\DTZero.AspNetCore\DTZero.AspNetCore.csproj" />
+    <ProjectReference Include="..\Person.DomainModel\Person.DomainModel.csproj" />
+    <ProjectReference Include="..\Person.Ef\Person.Ef.csproj" />
+    <ProjectReference Include="..\Person.Client\Person.Client.csproj" />
+  </ItemGroup>
+
+</Project>

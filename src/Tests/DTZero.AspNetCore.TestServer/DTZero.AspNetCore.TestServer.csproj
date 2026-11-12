@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <!-- Inherits TargetFrameworks from Directory.Build.props (net9.0;net10.0) -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\DTZero.AspNetCore\DTZero.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\DTZero\DTZero.csproj" />
+    <ProjectReference Include="..\DTZero.AspNetCore.TestLibrary\DTZero.AspNetCore.TestLibrary.csproj" />
+  </ItemGroup>
+	<ItemGroup>
+		<InternalsVisibleTo Include="DTZero.AspNet.Tests" />
+	</ItemGroup>
+</Project>

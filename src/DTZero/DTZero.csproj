@@ -1,0 +1,54 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<InternalsVisibleTo Include="FactoryGeneratorTests" />
+		<InternalsVisibleTo Include="DTZero.AspNetCore" />
+		<InternalsVisibleTo Include="DTZero.UnitTests" />
+		<InternalsVisibleTo Include="DTZero.IntegrationTests" />
+		<InternalsVisibleTo Include="Design.Tests" />
+		<InternalsVisibleTo Include="DTZero.TrimmingTests" />
+	</ItemGroup>
+	<PropertyGroup>
+		<RootNamespace>DTZero</RootNamespace>
+		<IsTrimmable>true</IsTrimmable>
+		<EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<AssemblyName>DTZero</AssemblyName>
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+		<DebugType>embedded</DebugType>
+		<Description>Zero DTOs. A 3-tier client/server data mapper for .NET domain models, powered by Roslyn source generators.</Description>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
+		<EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+		<GenerateDocumentationFile>false</GenerateDocumentationFile>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<PackageId>DTZero</PackageId>
+	</PropertyGroup>
+  <!-- Framework-specific package references -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+      <PackageReference Include="Microsoft.Extensions.DependencyInjection" VersionOverride="9.0.13" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+      <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+  <!-- Logging abstractions for optional structured logging support -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+      <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" VersionOverride="9.0.13" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+      <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+	  <None Include="..\..\README.md" Pack="true" PackagePath="" />
+	  <None Include="..\..\LICENSE" Pack="true" PackagePath="" />
+	  <None Include="..\..\neatoo_icon.png" Pack="true" PackagePath="" Visible="false" />
+	  <!-- Generator targets netstandard2.0 - path is relative to this project -->
+	  <None Include="..\Generator\bin\$(Configuration)\netstandard2.0\DTZero.Generator.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Generator\Generator.csproj" PrivateAssets="all"  />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="ILLink.Descriptors.xml">
+      <LogicalName>ILLink.Descriptors.xml</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

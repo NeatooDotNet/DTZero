@@ -1,0 +1,41 @@
+﻿namespace DTZero;
+
+/// <summary>
+/// Factory contract for types that support Save operation routing.
+/// Generated factories implement this interface to provide the Save method
+/// that routes to Insert, Update, or Delete based on the entity's state.
+/// </summary>
+/// <typeparam name="T">The factory-enabled type that implements <see cref="IFactorySaveMeta"/>.</typeparam>
+public interface IFactorySave<T>
+    where T : IFactorySaveMeta
+{
+    /// <summary>
+    /// Saves the entity by routing to the appropriate operation based on state:
+    /// Insert (IsNew), Update (!IsNew and !IsDeleted), or Delete (IsDeleted).
+    /// </summary>
+    /// <param name="entity">The entity to save.</param>
+    /// <param name="cancellationToken">Optional cancellation token to cancel the operation.</param>
+    /// <returns>The saved entity, or null if the operation was not authorized or the entity was not found.</returns>
+    Task<IFactorySaveMeta?> Save(T entity, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks whether saving is authorized for this factory.
+    /// When authorization is configured, delegates to the concrete CanSave() method.
+    /// When no authorization is configured, returns Authorized(true).
+    /// Runs only non-target authorization methods (role checks, permissions).
+    /// </summary>
+    /// <param name="cancellationToken">Optional cancellation token to cancel the operation.</param>
+    /// <returns>An Authorized result indicating whether saving is permitted.</returns>
+    Task<Authorized> CanSave(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks whether saving the specified entity is authorized.
+    /// When authorization is configured, runs ALL matching Write-scoped auth methods —
+    /// both non-target (role checks) and target-parameterized (entity state inspection).
+    /// When no authorization is configured, returns Authorized(true).
+    /// </summary>
+    /// <param name="target">The entity to check authorization against.</param>
+    /// <param name="cancellationToken">Optional cancellation token to cancel the operation.</param>
+    /// <returns>An Authorized result indicating whether saving the entity is permitted.</returns>
+    Task<Authorized> CanSave(T target, CancellationToken cancellationToken = default);
+}

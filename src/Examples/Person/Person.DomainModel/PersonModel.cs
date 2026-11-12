@@ -1,0 +1,134 @@
+﻿using Microsoft.EntityFrameworkCore;
+using DTZero;
+using Person.Ef;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Runtime.CompilerServices;
+
+namespace Person.DomainModel;
+
+public interface IPersonModel : INotifyPropertyChanged, IFactorySaveMeta
+{
+	string? FirstName { get; set; }
+	string? LastName { get; set; }
+	string? Email { get; set; }
+	string? Phone { get; set; }
+	string? Notes { get; set; }
+	DateTime Created { get; }
+	DateTime Modified { get; }
+
+	/// <summary>
+	/// Marks this entity for deletion on the next Save. <see cref="IFactorySaveMeta.IsDeleted"/>
+	/// is read-only through this interface, so this is the domain's way to delete.
+	/// </summary>
+	void MarkDeleted();
+}
+
+// partial: the generator adds the ordinal serializer, which carries IsNew and IsDeleted
+// across the wire in the default (ordinal) format, trimmed or not. They are public get; set; and need no annotation.
+[Factory]
+[AuthorizeFactory<IPersonModelAuth>]
+internal partial class PersonModel : IPersonModel
+{
+	[Create]
+	public PersonModel()
+	{
+		this.Created = DateTime.Now;
+		this.Modified = DateTime.Now;
+	}
+
+	[Required(ErrorMessage = "First Name is required")]
+	public string? FirstName { get; set { field = value; this.OnPropertyChanged(); } }
+
+	[Required(ErrorMessage = "Last Name is required")]
+	public string? LastName { get; set { field = value; this.OnPropertyChanged(); } }
+	public string? Email { get; set { field = value; this.OnPropertyChanged(); } }
+	public string? Phone { get; set { field = value; this.OnPropertyChanged(); } }
+	public string? Notes { get; set { field = value; this.OnPropertyChanged(); } }
+	public DateTime Created { get; set { field = value; this.OnPropertyChanged(); } }
+	public DateTime Modified { get; set { field = value; this.OnPropertyChanged(); } }
+	public bool IsDeleted { get; set; }
+
+	public bool IsNew { get; set; } = true;
+
+	public void MarkDeleted() => this.IsDeleted = true;
+
+	public event PropertyChangedEventHandler? PropertyChanged;
+
+	protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+	{
+		this.PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+	}
+
+	[Remote]
+	[Fetch]
+	internal async Task<bool> Fetch([Service] IPersonContext personContext, CancellationToken ct)
+	{
+		var personEntity = await personContext.Persons.FirstOrDefaultAsync(x => x.Id == 1, ct);
+		if (personEntity == null)
+		{
+			return false;
+		}
+		this.FirstName = personEntity.FirstName;
+		this.LastName = personEntity.LastName;
+		this.Email = personEntity.Email;
+		this.Phone = personEntity.Phone;
+		this.Notes = personEntity.Notes;
+		this.Created = personEntity.Created;
+		this.Modified = personEntity.Modified;
+		this.IsNew = false;
+		return true;
+	}
+
+	[Remote]
+	[Update]
+	[Insert]
+	internal async Task Upsert(
+		[Service] IPersonContext personContext,
+		[Service] IFactoryEvents factoryEvents,
+		CancellationToken ct)
+	{
+		var personEntity = await personContext.Persons.FirstOrDefaultAsync(x => x.Id == 1, ct);
+		bool isInsert = personEntity == null;
+		if(personEntity == null)
+		{
+			personEntity = new PersonEntity();
+			personContext.Persons.Add(personEntity);
+		}
+		personEntity.FirstName = this.FirstName ?? throw new InvalidOperationException("PersonModel.FirstName is required");
+		personEntity.LastName = this.LastName ?? throw new InvalidOperationException("PersonModel.LastName is required");
+		personEntity.Email = this.Email;
+		personEntity.Phone = this.Phone;
+		personEntity.Notes = this.Notes;
+		personEntity.Created = this.Created;
+		personEntity.Modified = this.Modified;
+		await personContext.SaveChangesAsync(ct);
+
+		// Factory event handlers share this method's DI scope, so any
+		// [FactoryEventHandler<PersonCreatedEvent>] that injects IPersonContext
+		// will see THIS personContext and participate in its transaction.
+		// A throwing handler rolls the whole Upsert back.
+		if (isInsert)
+			await factoryEvents.Raise(new PersonCreatedEvent(personEntity.Id), RaiseOptions.None, ct);
+		else
+			await factoryEvents.Raise(new PersonUpdatedEvent(personEntity.Id), RaiseOptions.None, ct);
+	}
+
+	[Remote]
+	[Delete]
+	internal async Task Delete(
+		[Service] IPersonContext personContext,
+		[Service] IFactoryEvents factoryEvents,
+		CancellationToken ct)
+	{
+		var personEntity = await personContext.Persons.FirstOrDefaultAsync(x => x.Id == 1, ct);
+
+		if (personEntity != null)
+		{
+			var id = personEntity.Id;
+			personContext.Persons.Remove(personEntity);
+			await personContext.SaveChangesAsync(ct);
+			await factoryEvents.Raise(new PersonDeletedEvent(id), RaiseOptions.None, ct);
+		}
+	}
+}

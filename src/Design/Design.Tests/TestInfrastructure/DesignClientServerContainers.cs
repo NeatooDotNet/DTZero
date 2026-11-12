@@ -1,0 +1,369 @@
+// =============================================================================
+// DESIGN SOURCE OF TRUTH: Testing Infrastructure
+// =============================================================================
+//
+// This file demonstrates the ClientServerContainers pattern for testing
+// DTZero applications without HTTP.
+//
+// DESIGN DECISION: Use container simulation instead of HTTP testing
+//
+// Reasons:
+// 1. Faster - no network overhead
+// 2. Deterministic - no timing issues
+// 3. Validates serialization - JSON round-trip still happens
+// 4. Isolated - no external dependencies
+//
+// The pattern: Create separate DI containers for client and server, wire
+// them together with a custom IMakeRemoteDelegateRequest that serializes
+// through JSON to simulate the actual boundary.
+//
+// =============================================================================
+
+using Design.Domain.Aggregates;
+using Design.Domain.FactoryPatterns;
+using Design.Domain.Services;
+using Design.Domain.ValueObjects;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using DTZero;
+using DTZero.Internal;
+using System.Reflection;
+using System.Text.Json;
+
+namespace Design.Tests.TestInfrastructure;
+
+/// <summary>
+/// Holds reference to the server provider for client-to-server communication.
+/// </summary>
+/// <remarks>
+/// GENERATOR BEHAVIOR: The client's IMakeRemoteDelegateRequest implementation
+/// uses this to find the server's DI container and resolve handlers.
+/// </remarks>
+public class ServerServiceProvider
+{
+    public IServiceProvider ServerProvider { get; set; } = null!;
+
+    /// <summary>
+    /// Number of calls this client has sent to the server. Lets a test show that an
+    /// operation without [Remote] ran on the client.
+    /// </summary>
+    public int RemoteCallCount { get; set; }
+}
+
+/// <summary>
+/// Simulates client-to-server remote calls with JSON serialization.
+/// </summary>
+/// <remarks>
+/// DESIGN DECISION: This implements the same interface that the HTTP client uses.
+/// Tests validate the full serialization round-trip without HTTP overhead.
+///
+/// DID NOT DO THIS: Mock the serialization
+///
+/// Reasons:
+/// 1. Serialization bugs are common - we want to catch them
+/// 2. The actual HTTP path uses the same serializer
+/// 3. Minimal overhead for maximum confidence
+///
+/// The rule: Test the actual serialization, just skip the HTTP.
+/// </remarks>
+internal sealed class MakeSerializedServerStandinDelegateRequest : IMakeRemoteDelegateRequest
+{
+    private readonly IDTZeroJsonSerializer _dtZeroJsonSerializer;
+    private readonly IServiceProvider _serviceProvider;
+
+    public MakeSerializedServerStandinDelegateRequest(
+        IDTZeroJsonSerializer dtZeroJsonSerializer,
+        IServiceProvider serviceProvider)
+    {
+        _dtZeroJsonSerializer = dtZeroJsonSerializer;
+        _serviceProvider = serviceProvider;
+    }
+
+    public async Task<T> ForDelegate<T>(Type delegateType, object?[]? parameters, CancellationToken cancellationToken)
+    {
+        var result = await ForDelegateNullable<T>(delegateType, parameters, cancellationToken);
+        if (result == null)
+        {
+            throw new InvalidOperationException("The result of the remote delegate call was null, but a non-nullable type was expected.");
+        }
+        return result;
+    }
+
+    public async Task<T?> ForDelegateNullable<T>(Type delegateType, object?[]? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _serviceProvider.GetRequiredService<ServerServiceProvider>().RemoteCallCount++;
+
+        // Serialize the request (client side)
+        var remoteRequest = _dtZeroJsonSerializer.ToRemoteDelegateRequest(delegateType, parameters);
+        var json = JsonSerializer.Serialize(remoteRequest);
+        var remoteRequestOnServer = JsonSerializer.Deserialize<RemoteRequestDto>(json)!;
+
+        // Execute on server (simulated)
+        var remoteResponseOnServer = await _serviceProvider
+            .GetRequiredService<ServerServiceProvider>()
+            .ServerProvider
+            .GetRequiredService<HandleRemoteDelegateRequest>()(remoteRequestOnServer, cancellationToken);
+
+        // Deserialize the response
+        json = JsonSerializer.Serialize(remoteResponseOnServer);
+        var result = JsonSerializer.Deserialize<RemoteResponseDto>(json)!;
+
+        var deserialized = _dtZeroJsonSerializer.DeserializeRemoteResponse<T>(result);
+
+        DispatchRelay(result);
+
+        return deserialized;
+    }
+
+    public async Task ForDelegateEvent(Type delegateType, object?[]? parameters, CancellationToken cancellationToken)
+    {
+        _serviceProvider.GetRequiredService<ServerServiceProvider>().RemoteCallCount++;
+        var remoteRequest = _dtZeroJsonSerializer.ToRemoteDelegateRequest(delegateType, parameters);
+        var json = JsonSerializer.Serialize(remoteRequest);
+        var remoteRequestOnServer = JsonSerializer.Deserialize<RemoteRequestDto>(json)!;
+
+        var remoteResponseOnServer = await _serviceProvider
+            .GetRequiredService<ServerServiceProvider>()
+            .ServerProvider
+            .GetRequiredService<HandleRemoteDelegateRequest>()(remoteRequestOnServer, cancellationToken);
+
+        // A client-initiated Raise relays exactly like a [Remote] factory call — the server
+        // builds the batch either way. Round-trip through JSON first so the relayed events
+        // cross the same serialization boundary the factory path puts them through.
+        json = JsonSerializer.Serialize(remoteResponseOnServer);
+        var result = JsonSerializer.Deserialize<RemoteResponseDto>(json)!;
+
+        DispatchRelay(result);
+    }
+
+    /// <summary>
+    /// Fire-and-forget relay using the same Task.Run + Task.Yield pattern as production
+    /// <see cref="MakeRemoteDelegateRequest"/> so timing tests observe production-equivalent
+    /// ordering.
+    /// </summary>
+    /// <remarks>
+    /// Shared by both call paths deliberately, mirroring production. The defect this shim
+    /// used to reproduce was a divergence between them.
+    /// </remarks>
+    private void DispatchRelay(RemoteResponseDto? response)
+    {
+        var relay = _serviceProvider.GetService<IFactoryEventRelay>();
+        if (relay == null || response == null)
+        {
+            return;
+        }
+
+        var rawEvents = response.RelayedEvents;
+        var serializer = _dtZeroJsonSerializer;
+#pragma warning disable CA1031 // Relay exceptions must never propagate to the factory caller.
+        _ = Task.Run(async () =>
+        {
+            await Task.Yield();
+            IReadOnlyList<FactoryEventBase> events;
+            try
+            {
+                events = rawEvents is { Count: > 0 }
+                    ? FactoryEventDeserializer.Deserialize(rawEvents, serializer)
+                    : Array.Empty<FactoryEventBase>();
+            }
+            catch (Exception)
+            {
+                return;
+            }
+
+            try
+            {
+                await relay.Relay(events).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Relay exceptions must not propagate to the factory caller.
+            }
+        }, CancellationToken.None);
+#pragma warning restore CA1031
+    }
+}
+
+/// <summary>
+/// Simple IHostApplicationLifetime for testing.
+/// </summary>
+internal class TestHostApplicationLifetime : IHostApplicationLifetime
+{
+    private readonly CancellationTokenSource _startedSource = new();
+    private readonly CancellationTokenSource _stoppingSource = new();
+    private readonly CancellationTokenSource _stoppedSource = new();
+
+    public CancellationToken ApplicationStarted => _startedSource.Token;
+    public CancellationToken ApplicationStopping => _stoppingSource.Token;
+    public CancellationToken ApplicationStopped => _stoppedSource.Token;
+
+    public void StopApplication()
+    {
+        _stoppingSource.Cancel();
+        _stoppedSource.Cancel();
+    }
+}
+
+/// <summary>
+/// Creates isolated client, server, and local containers for integration testing.
+/// </summary>
+/// <remarks>
+/// DESIGN DECISION: Three containers - client, server, and local
+///
+/// - Client (DTZeroFactory.Remote): Has remote stubs, calls server via serialization
+/// - Server (DTZeroFactory.Server): Has full implementations, handles remote requests
+/// - Local (DTZeroFactory.Logical): Full implementation, no remote calls (single-tier)
+///
+/// Tests should cover all three modes to ensure behavior is consistent.
+/// </remarks>
+public static class DesignClientServerContainers
+{
+    private static readonly object LockContainer = new();
+
+    /// <summary>
+    /// Creates scopes for testing client-server communication.
+    /// </summary>
+    /// <remarks>
+    /// COMMON MISTAKE: Forgetting to link client and server scopes
+    ///
+    /// The client scope needs a reference to the server scope for remote calls.
+    /// This is done via ServerServiceProvider.
+    ///
+    /// Usage:
+    ///   var (server, client, local) = DesignClientServerContainers.Scopes();
+    ///   var factory = client.GetRequiredService<IExampleClassFactory>();
+    ///   var result = await factory.Create("test");  // Calls server through serialization
+    /// </remarks>
+    public static (IServiceScope server, IServiceScope client, IServiceScope local) Scopes(
+        Action<IServiceCollection>? configureServer = null,
+        Action<IServiceCollection>? configureClient = null,
+        SerializationFormat format = SerializationFormat.Ordinal)
+    {
+        #region clientserver-container-setup
+        var serializationOptions = new DTZeroSerializationOptions { Format = format };
+
+        var serverCollection = new ServiceCollection();
+        var clientCollection = new ServiceCollection();
+        var localCollection = new ServiceCollection();
+
+        // One mode per container: Server handles requests, Remote serializes its
+        // [Remote] calls, Logical runs everything in-process
+        ConfigureContainer(serverCollection, DTZeroFactory.Server, serializationOptions);
+        ConfigureContainer(clientCollection, DTZeroFactory.Remote, serializationOptions);
+        ConfigureContainer(localCollection, DTZeroFactory.Logical, serializationOptions);
+
+        // The client's remote calls go to the server scope, serialized, in place of HTTP
+        clientCollection.AddScoped<ServerServiceProvider>();
+        clientCollection.AddScoped<IMakeRemoteDelegateRequest, MakeSerializedServerStandinDelegateRequest>();
+        #endregion
+
+        // Server-only services
+        serverCollection.AddScoped<IExampleService, ExampleService>();
+        serverCollection.AddScoped<INotificationService, NotificationService>();
+        serverCollection.AddSingleton<IOrderDbContext, InMemoryOrderDbContext>();
+        serverCollection.AddScoped<IProductReviewService, InMemoryProductReviewService>();
+        serverCollection.AddScoped<IPhaseAuditService, PhaseAuditService>();
+        serverCollection.AddSingleton<ITaxTable, InMemoryTaxTable>();
+        serverCollection.AddSingleton<ICustomerPreferencesStore, InMemoryCustomerPreferencesStore>();
+        serverCollection.AddSingleton<ISupportLog, InMemorySupportLog>();
+        serverCollection.AddSingleton<ICheckoutLedger, InMemoryCheckoutLedger>();
+        localCollection.AddScoped<IExampleService, ExampleService>();
+        localCollection.AddScoped<INotificationService, NotificationService>();
+        localCollection.AddSingleton<IOrderDbContext, InMemoryOrderDbContext>();
+        localCollection.AddScoped<IProductReviewService, InMemoryProductReviewService>();
+        localCollection.AddScoped<IPhaseAuditService, PhaseAuditService>();
+        localCollection.AddSingleton<ITaxTable, InMemoryTaxTable>();
+        localCollection.AddSingleton<ICustomerPreferencesStore, InMemoryCustomerPreferencesStore>();
+        localCollection.AddSingleton<ISupportLog, InMemorySupportLog>();
+        localCollection.AddSingleton<ICheckoutLedger, InMemoryCheckoutLedger>();
+
+        // One signed-in user, shared by the three containers, as a real user is the
+        // same person on the client and the server. Tests take a role away to deny.
+        var user = new TestUser();
+        foreach (var collection in new[] { serverCollection, clientCollection, localCollection })
+        {
+            collection.AddSingleton(user);
+            collection.AddSingleton<ICurrentUser>(user);
+        }
+
+        // Apply custom configuration
+        configureServer?.Invoke(serverCollection);
+        configureClient?.Invoke(clientCollection);
+
+        var serverProvider = serverCollection.BuildServiceProvider();
+        var clientProvider = clientCollection.BuildServiceProvider();
+        var localProvider = localCollection.BuildServiceProvider();
+
+        var serverScope = serverProvider.CreateScope();
+        var clientScope = clientProvider.CreateScope();
+        var localScope = localProvider.CreateScope();
+
+        // Link client to server
+        lock (LockContainer)
+        {
+            clientScope.ServiceProvider.GetRequiredService<ServerServiceProvider>().ServerProvider = serverScope.ServiceProvider;
+        }
+
+        return (serverScope, clientScope, localScope);
+    }
+
+    private static void ConfigureContainer(IServiceCollection services, DTZeroFactory mode, DTZeroSerializationOptions serializationOptions)
+    {
+        services.AddLogging(builder => builder.AddProvider(NullLoggerProvider.Instance));
+        services.AddSingleton<IHostApplicationLifetime, TestHostApplicationLifetime>();
+
+        // Register factory types
+        RegisterFactoryTypes(services);
+
+        // Register interface implementations via convention
+        // DESIGN DECISION: RegisterMatchingName auto-maps IFoo → Foo
+        // This convention reduces boilerplate while keeping explicit control.
+        services.AddDTZero(mode, serializationOptions, typeof(ExampleClassFactory).Assembly);
+        services.RegisterMatchingName(typeof(ExampleClassFactory).Assembly);
+    }
+
+    /// <summary>
+    /// Registers all types decorated with [Factory] attribute.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: Use attribute scanning for registration
+    ///
+    /// This ensures the same types are registered that the generator sees.
+    /// Manual registration could drift from generator output.
+    /// </remarks>
+    private static void RegisterFactoryTypes(IServiceCollection services)
+    {
+        foreach (var type in typeof(ExampleClassFactory).Assembly.GetTypes())
+        {
+            if (type.GenericTypeArguments.Length > 0 || type.IsAbstract || type.IsInterface)
+                continue;
+
+            if (type.GetCustomAttribute<FactoryAttribute>() == null)
+                continue;
+
+            // Skip static classes (they have abstract sealed)
+            if (type.IsAbstract && type.IsSealed)
+                continue;
+
+            // Skip records (they have a compiler-generated <Clone>$ method)
+            if (type.GetMethod("<Clone>$") != null)
+                continue;
+
+            services.AddScoped(type);
+        }
+    }
+}
+
+/// <summary>
+/// Extension methods for IServiceScope.
+/// </summary>
+public static class ServiceScopeExtensions
+{
+    public static T GetRequiredService<T>(this IServiceScope scope) where T : class
+    {
+        return scope.ServiceProvider.GetRequiredService<T>();
+    }
+}

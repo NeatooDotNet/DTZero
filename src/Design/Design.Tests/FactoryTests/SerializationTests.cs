@@ -1,0 +1,707 @@
+// =============================================================================
+// DESIGN SOURCE OF TRUTH: Serialization Round-Trip Tests
+// =============================================================================
+//
+// Tests verifying that objects serialize correctly across the client/server
+// boundary. These tests use the two DI container pattern to validate full
+// JSON round-trip serialization.
+//
+// =============================================================================
+//
+// SERIALIZATION ROUND-TRIP GUIDE
+// ==============================
+//
+// This guide explains which types can cross the client/server boundary,
+// how IOrdinalSerializable works, and how to use the two DI container
+// test pattern.
+//
+// -----------------------------------------------------------------------------
+// TYPES THAT CAN CROSS THE BOUNDARY
+// -----------------------------------------------------------------------------
+//
+// YES - These serialize correctly:
+//   - Primitive types (int, string, bool, decimal, etc.)
+//   - Nullable primitives (int?, string?, etc.)
+//   - Enums (written as their numeric values)
+//   - DateTime, DateTimeOffset, TimeSpan, Guid
+//   - Records (immutable value objects like Money)
+//   - Classes with [Factory] attribute (generate IOrdinalSerializable)
+//   - Concrete collections: List<T>, Dictionary<TKey,TValue>, arrays
+//   - Nested objects (if their types are also serializable)
+//   - LazyLoad<T> properties on [Factory] classes (two-slot ordinal encoding:
+//     Value + IsLoaded; see LazyLoadExample.cs and LazyLoadTests.cs)
+//
+// NO - These will NOT serialize correctly:
+//   - Properties with private setters, and get-only properties: the ordinal
+//     format leaves them out entirely (only public, internal or init setters
+//     are written), so the other side keeps whatever its constructor set
+//   - Service references (IRepository, ILogger, etc.)
+//   - Delegate/Func/Action fields
+//   - Lazy<T> (BCL) -- use LazyLoad<T> instead for deferred loading with
+//     serialization support. LazyLoad<T> preserves Value and IsLoaded across
+//     the wire; the loader delegate is reconstructed via constructor-initialization.
+//   - Generic interface-typed collections (IEnumerable<T>, IList<T>). An
+//     interface-typed property crosses only when the interface is non-generic
+//     and declared in a registered assembly: Order.Lines is IOrderLineList,
+//     written as {"$type": <concrete full name>, "$value": ...}
+//
+// PARTIAL - Special handling required:
+//   - Collection classes: only the items cross the wire, never the collection's
+//     own properties; state the server needs (a removed line) lives on the item
+//   - Child entity collections (see OrderLineList pattern)
+//   - Shared and circular references: preserved for plain mutable classes,
+//     STJ collections (DTZeroPreserveReferenceHandler) and [Factory] types,
+//     in both formats. In Ordinal, a back reference needs the [Factory] class
+//     it points at to have only plain setters: one with an init-only or
+//     required property is built after its properties are read, so the
+//     reference fails with a JsonException naming the type (#22). Records
+//     bypass reference tracking entirely: value objects have no identity.
+//
+// -----------------------------------------------------------------------------
+// WHY IORDINALSERIALIZABLE MATTERS
+// -----------------------------------------------------------------------------
+//
+// DTZero uses ordinal-based serialization for efficiency and type safety:
+//
+// 1. WHAT IT DOES:
+//    - The object is written as a JSON array of property values, no names,
+//      under the $id a later reference to it names: {"$id":"1","$values":[...]};
+//      the later reference is {"$ref":"1"}
+//    - JSON payload is smaller: {"$id":"1","$values":["Customer",1,...]} vs
+//      {"$id":"1","CustomerName":"Customer","Id":1,...}
+//
+// 2. HOW IT'S GENERATED:
+//    - The [Factory] attribute triggers source generation
+//    - Generator creates partial class implementing IOrdinalSerializable
+//    - Array positions follow PropertyNames: the type's own properties first,
+//      then its base class's, each group in ordinal (StringComparer.Ordinal) name
+//      order -- not declaration order. Adding or renaming a property shifts
+//      positions, so client and server rebuild together.
+//
+// 3. WHAT YOU NEED TO DO:
+//    - Use [Factory] attribute on your class
+//    - Make the class partial
+//    - Use public setters on properties that need to serialize
+//
+// 4. CONSTRUCTOR SHAPE GATES WHICH PATH RUNS:
+//    Ordinal serialization is emitted only when the type can be built without
+//    arguments -- either no explicit ctor, a parameterless ctor, or a ctor
+//    whose parameters all have default values. Any class whose only ctors
+//    require non-default arguments causes the generator to skip
+//    IOrdinalSerializable for that type. (The check is purely shape-based --
+//    the `[Service]` attribute is not consulted; see RequiresServiceInstantiationCheck
+//    in the generator.)
+//
+//    Types that skip ordinal still serialize -- they fall back to the named
+//    JSON path, which resolves the object via IServiceProvider.GetRequiredService.
+//    DI then fills the ctor parameters from the local container on each side
+//    of the wire. That fallback is what makes constructor-injected services
+//    arrive on both client and server. Ordinal FromOrdinalArray would not
+//    resolve them.
+//
+//    Practical rule: if you write `public MyEntity(ISomeService svc)`, you are
+//    opting out of ordinal for that type. The DI path takes over and the
+//    injected service is wired up on each side of the boundary.
+//
+//    See: CtorInjectionExample.cs and the CtorInjectedEntity_* tests below.
+//
+// What the generator adds to Order (in Generated/, not checked in):
+//   - static string[] PropertyNames: the array positions, in order
+//   - ToOrdinalArray(), and FromOrdinalArray(), which rebuilds the object
+//     with new Order { ... } from the array -- no DI on this path
+//   Order_OrdinalShape_FollowsPropertyNames below pins Order's positions.
+//
+// -----------------------------------------------------------------------------
+// TWO DI CONTAINER TEST PATTERN (Visual)
+// -----------------------------------------------------------------------------
+//
+//   +------------------+                      +------------------+
+//   |   CLIENT SCOPE   |                      |   SERVER SCOPE   |
+//   +------------------+                      +------------------+
+//   |                  |                      |                  |
+//   | IOrderFactory    |                      | IOrderFactory    |
+//   | (Remote stub)    |                      | (Real impl)      |
+//   |                  |                      |                  |
+//   | DTZeroJson-      |                      | DTZeroJson-      |
+//   | Serializer       |                      | Serializer       |
+//   |                  |                      |                  |
+//   | ServerService-   |---references--->     | HandleRemote-    |
+//   | Provider         |                      | DelegateRequest  |
+//   |                  |                      |                  |
+//   +------------------+                      +------------------+
+//           |                                         ^
+//           |                                         |
+//           |   1. Serialize request to JSON          |
+//           +-----------------------------------------+
+//           |                                         |
+//           |   2. Execute on server                  |
+//           |   3. Serialize response to JSON         |
+//           |                                         |
+//           +<----------------------------------------+
+//           |                                         |
+//           |   4. Deserialize response               |
+//           v                                         |
+//   +------------------+                      +------------------+
+//   | Order object     |  <-- ROUND-TRIP --> | Order object     |
+//   | (deserialized)   |                      | (created here)   |
+//   +------------------+                      +------------------+
+//
+// USAGE PATTERN:
+//
+//   var (server, client, local) = DesignClientServerContainers.Scopes();
+//
+//   // CLIENT: Calls go through serialization to server
+//   var clientFactory = client.GetRequiredService<IOrderFactory>();
+//   var order = await clientFactory.Create("Customer");  // Remote call!
+//
+//   // SERVER: Direct execution, no serialization
+//   var serverFactory = server.GetRequiredService<IOrderFactory>();
+//
+//   // LOCAL: Single-tier mode, no remote calls
+//   var localFactory = local.GetRequiredService<IOrderFactory>();
+//
+// WHEN TO USE EACH:
+//
+//   - Client scope: Testing the actual client experience (Blazor WASM)
+//   - Server scope: Testing server logic in isolation
+//   - Local scope: Testing without serialization overhead
+//
+// =============================================================================
+
+using System.Text.Json;
+using Design.Domain.Aggregates;
+using Design.Domain.Entities;
+using Design.Domain.FactoryPatterns;
+using Design.Tests.TestInfrastructure;
+using Microsoft.Extensions.DependencyInjection;
+using DTZero;
+using DTZero.Internal;
+
+namespace Design.Tests.FactoryTests;
+
+/// <summary>
+/// Tests for serialization round-trip across client/server boundary.
+/// </summary>
+/// <remarks>
+/// DESIGN DECISION: Objects must survive JSON serialization
+///
+/// When objects cross the client/server boundary, they are serialized to JSON
+/// and deserialized on the other side. These tests verify that:
+/// 1. All public properties with setters are preserved
+/// 2. Value objects serialize correctly
+/// 3. Collections are properly reconstructed
+/// 4. Nullable values are handled correctly
+///
+/// COMMON MISTAKE: Private setters break serialization
+///
+/// Properties with private setters are left out of the ordinal array
+/// altogether: the value never reaches the other side. Always use public
+/// setters for properties that need to cross the boundary.
+/// </remarks>
+public class SerializationTests
+{
+    /// <summary>
+    /// Verifies that Create returns an object that has crossed the serialization boundary.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: Remote Create serializes the result back to client
+    ///
+    /// When you call factory.Create() remotely:
+    /// 1. Request is serialized to server
+    /// 2. Server creates the object
+    /// 3. Object is serialized back to client
+    /// 4. Client receives the deserialized object
+    ///
+    /// This test verifies step 3-4: the created object survives the round-trip.
+    /// </remarks>
+    [Fact]
+    public async Task Create_ResultSurvivesSerializationRoundTrip()
+    {
+        // Arrange - use client/server mode (not local) to force serialization
+        var (server, client, _) = DesignClientServerContainers.Scopes();
+        var factory = client.GetRequiredService<IExampleClassFactoryFactory>();
+
+        // Act - Create goes to server, result comes back serialized
+        var example = await factory.Create("Serialization Test");
+
+        // Assert - all values survived the round-trip
+        Assert.NotNull(example);
+        Assert.Equal("Serialization Test", example.Name);
+        Assert.True(example.Id > 0, "Server should have assigned an ID");
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    /// <summary>
+    /// Verifies that Fetch returns an object that has crossed the serialization boundary.
+    /// </summary>
+    [Fact]
+    public async Task Fetch_ResultSurvivesSerializationRoundTrip()
+    {
+        // Arrange
+        var (server, client, _) = DesignClientServerContainers.Scopes();
+        var factory = client.GetRequiredService<IExampleClassFactoryFactory>();
+
+        // Act - Fetch goes to server, result comes back serialized
+        var example = await factory.Fetch(123);
+
+        // Assert
+        Assert.NotNull(example);
+        Assert.Equal(123, example.Id);
+        Assert.Equal("Loaded_123", example.Name);
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    /// <summary>
+    /// Verifies that value objects serialize correctly.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: Value objects serialize as nested JSON objects
+    ///
+    /// Money is a plain record with no factory (VisionAlignment R-F). It is serialized
+    /// as a nested object:
+    /// { "UnitPrice": { "Amount": 10.00, "Currency": "USD" } }
+    ///
+    /// It is rebuilt through its constructor on the receiving side, so the
+    /// constructor's currency check runs there too.
+    ///
+    /// The order is fetched through the client, so the lines and their Money
+    /// values cross the serializing stand-in.
+    /// </remarks>
+    [Fact]
+    public async Task ValueObject_SurvivesSerializationRoundTrip()
+    {
+        // Arrange - fetch through the client so the aggregate is serialized
+        var (server, client, _) = DesignClientServerContainers.Scopes();
+        var factory = client.GetRequiredService<IOrderFactory>();
+
+        // Act - Fetch order with lines
+        var order = await factory.Fetch(100);
+
+        // Assert - value object calculated from child collection
+        // Total is calculated: (10.00 * 2) + (25.00 * 1) = 45.00
+        Assert.NotNull(order);
+        Assert.NotNull(order.Total);
+        Assert.Equal(45.00m, order.Total.Amount);
+        Assert.Equal("USD", order.Total.Currency);
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    /// <summary>
+    /// Verifies that collections work correctly in local mode.
+    /// </summary>
+    /// <remarks>
+    /// Local (single-tier) mode loads the same aggregate with no serialization.
+    /// Collection_FetchedThroughClient_ArrivesWithItems covers the client.
+    ///
+    /// DID NOT DO THIS: Store a child factory on the list for AddLine
+    ///
+    /// A method-injected service stored in a field does not survive
+    /// serialization, which once made adding a line work in Local mode only.
+    /// The client now builds a line with IOrderLineFactory.Create and hands it
+    /// to Order.AddLine (R-C), in every mode.
+    /// </remarks>
+    [Fact]
+    public async Task Collection_WorksInLocalMode()
+    {
+        // Arrange - Local mode: one tier, no serialization
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IOrderFactory>();
+
+        // Act - Fetch order with child collection
+        var order = await factory.Fetch(200);
+
+        // Assert - collection is populated
+        Assert.NotNull(order);
+        Assert.NotNull(order.Lines);
+        Assert.Equal(2, order.Lines.Count);
+
+        // Verify child entities have correct values
+        Assert.Contains(order.Lines, l => l.ProductName == "Widget A");
+        Assert.Contains(order.Lines, l => l.ProductName == "Widget B");
+
+        // Verify value objects on children survived
+        var widgetA = order.Lines.First(l => l.ProductName == "Widget A");
+        Assert.Equal(10.00m, widgetA.UnitPrice.Amount);
+        Assert.Equal(20.00m, widgetA.LineTotal.Amount); // 10 * 2
+
+        local.Dispose();
+    }
+
+    public static IEnumerable<object[]> Formats()
+    {
+        yield return new object[] { SerializationFormat.Ordinal };
+        yield return new object[] { SerializationFormat.Named };
+    }
+
+    /// <summary>
+    /// Verifies that the child collection's items reach the client in both formats.
+    /// </summary>
+    /// <remarks>
+    /// GENERATOR BEHAVIOR: A [Factory] collection (OrderLineList : List&lt;OrderLine&gt;)
+    /// serializes as a JSON array of its items in both formats; each item uses that
+    /// format's shape (an OrderLine is an ordinal array in Ordinal format).
+    ///
+    /// Before #17 a partial [Factory] list got an object-shaped ordinal converter that
+    /// wrote List&lt;T&gt;.Capacity and no items, so a Remote fetch returned an empty list.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(Formats))]
+    public async Task Collection_FetchedThroughClient_ArrivesWithItems(SerializationFormat format)
+    {
+        var (server, client, local) = DesignClientServerContainers.Scopes(format: format);
+        var factory = client.GetRequiredService<IOrderFactory>();
+
+        var order = await factory.Fetch(200);
+
+        Assert.NotNull(order);
+        Assert.Equal(2, order.Lines.Count);
+        var widgetA = order.Lines.Single(l => l.ProductName == "Widget A");
+        Assert.Equal(10.00m, widgetA.UnitPrice.Amount);
+        Assert.Equal(2, widgetA.Quantity);
+        Assert.Contains(order.Lines, l => l.ProductName == "Widget B");
+
+        server.Dispose();
+        client.Dispose();
+        local.Dispose();
+    }
+
+    /// <summary>
+    /// Verifies that nullable values serialize correctly.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: Null is serialized as JSON null
+    ///
+    /// When a server method returns null, it serializes as JSON null
+    /// and deserializes as null on the client. This is important for
+    /// "not found" answers from a lookup.
+    /// </remarks>
+    [Fact]
+    public async Task NullableValue_SurvivesSerializationRoundTrip()
+    {
+        // Arrange - an unknown SKU makes the server return null
+        var (server, client, _) = DesignClientServerContainers.Scopes();
+
+        var catalog = client.GetRequiredService<IProductCatalog>();
+
+        // Act - the call crosses to the server and the null comes back
+        var nullItem = await catalog.FindBySkuAsync("NO-SUCH-SKU");
+
+        // Assert - null survived serialization round-trip
+        Assert.Null(nullItem);
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    /// <summary>
+    /// Verifies that objects modified on client can be sent back to server.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: Client modifications are sent via Save
+    ///
+    /// When you modify an object on the client and call Save:
+    /// 1. Modified object is serialized to server
+    /// 2. Server deserializes and processes the Save (Insert/Update/Delete)
+    /// 3. Result is serialized back to client
+    ///
+    /// This tests the full round-trip: client → server → client
+    ///
+    /// The order and its line are built on the client (local Create, R-C);
+    /// Save carries both to the server and returns a new instance.
+    /// </remarks>
+    [Fact]
+    public async Task ModifiedObject_SerializesToServer()
+    {
+        // Arrange
+        var (server, client, _) = DesignClientServerContainers.Scopes();
+        var factory = client.GetRequiredService<IOrderFactory>();
+        var lineFactory = client.GetRequiredService<IOrderLineFactory>();
+        var order = factory.Create("Test Customer");
+
+        // Add a line (required for Submit)
+        order.AddLine(lineFactory.Create("Test Widget", 10.00m, 1));
+
+        // Act - modify on client, then save
+        order.Submit();
+        var saved = await factory.Save(order);
+
+        // Assert - the saved order came back from the server
+        Assert.NotNull(saved);
+        Assert.Equal(OrderStatus.Submitted, saved.Status);
+        Assert.False(saved.IsNew); // FactoryComplete sets IsNew=false after Insert
+        Assert.Single(saved.Lines);
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    /// <summary>
+    /// Verifies that IFactorySaveMeta properties serialize correctly.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: IsNew and IsDeleted must survive serialization
+    ///
+    /// The Save routing depends on these properties. If they don't serialize
+    /// correctly, Save will route to the wrong operation:
+    /// - IsNew=true → Insert
+    /// - IsDeleted=true → Delete
+    /// - Otherwise → Update
+    ///
+    /// Both properties need public setters for this to work.
+    /// </remarks>
+    [Fact]
+    public async Task SaveMetaProperties_SurviveSerializationRoundTrip()
+    {
+        // Arrange - create new order on the client (IsNew=true; Create is local)
+        var (server, client, _) = DesignClientServerContainers.Scopes();
+        var factory = client.GetRequiredService<IOrderFactory>();
+        var newOrder = factory.Create("Save Meta Test");
+        Assert.True(newOrder.IsNew);
+        Assert.False(newOrder.IsDeleted);
+
+        // Act - IsNew=true crosses to the server, so Save routes to Insert
+        var inserted = await factory.Save(newOrder);
+        Assert.NotNull(inserted);
+        Assert.False(inserted.IsNew);
+
+        // Act - fetch existing order (IsNew=false)
+        var existingOrder = await factory.Fetch(400);
+        Assert.NotNull(existingOrder);
+
+        // Assert - IsNew=false survived round-trip
+        Assert.False(existingOrder.IsNew);
+        Assert.False(existingOrder.IsDeleted);
+
+        // Act - mark for deletion; IsDeleted=true crosses, so Save routes to Delete
+        existingOrder.MarkDeleted();
+        Assert.True(existingOrder.IsDeleted);
+        await factory.Save(existingOrder);
+
+        // Assert - the order is gone
+        Assert.Null(await factory.Fetch(400));
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    // -------------------------------------------------------------------------
+    // Constructor Injection / Ordinal Interaction
+    //
+    // CtorInjectedEntity (CtorInjectionExample.cs) has only a ctor that
+    // requires a DI service. The generator therefore SKIPS IOrdinalSerializable
+    // emission for it. Serialization falls back to the named JSON path, which
+    // calls IServiceProvider.GetRequiredService on each side -- so the ctor
+    // runs on each side with that side's local DI container, and the injected
+    // service is wired up after deserialization.
+    //
+    // These tests pin both halves of that behavior:
+    // 1. Ordinal generation is suppressed for CtorInjectedEntity.
+    // 2. After a server->client round-trip, the client instance's ctor saw
+    //    the CLIENT's ITenantTokenService -- proving DI ran post-deserialization.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Verifies that the generator skips IOrdinalSerializable when the type
+    /// has no parameterless or all-default ctor.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: The generator's RequiresServiceInstantiationCheck
+    /// looks purely at constructor shape -- parameter count and default
+    /// values. It does not consult `[Service]` attributes. Any class whose
+    /// only ctors require non-default arguments is excluded from ordinal.
+    ///
+    /// The contrast assertion (ExampleClassFactory implements IOrdinalSerializable)
+    /// pins the inverse: types with a parameterless ctor DO get ordinal.
+    /// If this contrast ever breaks, the test will catch the regression in
+    /// either direction.
+    /// </remarks>
+    [Fact]
+    public void CtorInjectedEntity_DoesNotImplementIOrdinalSerializable()
+    {
+        Assert.False(
+            typeof(IOrdinalSerializable).IsAssignableFrom(typeof(CtorInjectedEntity)),
+            "Types whose only ctor requires DI arguments must not implement IOrdinalSerializable.");
+
+        Assert.True(
+            typeof(IOrdinalSerializable).IsAssignableFrom(typeof(ExampleClassFactory)),
+            "Sanity contrast: ExampleClassFactory has a parameterless ctor and must implement IOrdinalSerializable.");
+    }
+
+    /// <summary>
+    /// Verifies the named/DI deserialization path: after a server-to-client
+    /// round-trip, the client-side instance has its ctor-injected service
+    /// resolved from the CLIENT'S DI container.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: The two containers register distinct ITenantTokenService
+    /// instances ("server-token" vs "client-token"). If ordinal serialization
+    /// were in play, _tokens would never be set during deserialization and
+    /// TokenFromContext would NRE. Instead, DTZeroJsonTypeInfoResolver
+    /// detects the type is DI-registered and calls GetRequiredService, which
+    /// builds the instance via the client container's ctor invocation -- with
+    /// the client's ITenantTokenService passed in.
+    /// </remarks>
+    [Fact]
+    public async Task CtorInjectedEntity_ServiceArrivesOnEachSideAfterRoundTrip()
+    {
+        var (server, client, _) = DesignClientServerContainers.Scopes(
+            configureServer: s => s.AddScoped<ITenantTokenService>(_ => new TenantTokenService("server-token")),
+            configureClient: c => c.AddScoped<ITenantTokenService>(_ => new TenantTokenService("client-token")));
+
+        var factory = client.GetRequiredService<ICtorInjectedEntityFactory>();
+        var entity = await factory.Fetch(42);
+
+        // State survived the round-trip.
+        Assert.NotNull(entity);
+        Assert.Equal(42, entity!.Id);
+        Assert.Equal("Loaded_42", entity.Name);
+
+        // The instance returned to the client was reconstructed by the
+        // client's DI container during deserialization. Its ctor was invoked
+        // with the CLIENT's ITenantTokenService, not the server's.
+        Assert.Equal("client-token", entity.TokenFromContext);
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    /// <summary>
+    /// Regression pin (targeted): the generator must emit
+    /// `AddTransient&lt;ExecCtorEntity&gt;()` from its FactoryServiceRegistrar,
+    /// so the client-side deserializer can resolve the type via
+    /// IServiceProvider.GetRequiredService.
+    /// </summary>
+    /// <remarks>
+    /// BUG HISTORY: FactoryModelBuilder.cs scoped `requiresEntityRegistration`
+    /// to ReadMethodModel only (Create/Fetch). A class with only [Execute]
+    /// was never registered, so deserialization on the client could not
+    /// invoke the ctor through DI -- the injected service stayed null. Fixed
+    /// by also setting the flag when typeInfo.RequiresServiceInstantiation
+    /// is true.
+    ///
+    /// Why a separate test from the round-trip below: DesignClientServerContainers.
+    /// RegisterFactoryTypes performs a reflection-based fallback that registers
+    /// every [Factory] class as scoped. That fallback masks the missing emit in
+    /// the round-trip test. This test builds a minimal container using ONLY
+    /// `services.AddDTZero(...)` so the generator's output is the
+    /// only source of registrations -- the same as real Blazor WASM startup.
+    /// </remarks>
+    [Fact]
+    public void ExecCtorEntity_IsAutoRegisteredByGenerator_ClientSide()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDTZero(
+            DTZeroFactory.Remote,
+            new DTZeroSerializationOptions { Format = SerializationFormat.Ordinal },
+            typeof(ExecCtorEntity).Assembly);
+
+        using var provider = services.BuildServiceProvider();
+
+        var isServiceCheck = provider.GetRequiredService<IServiceProviderIsService>();
+
+        // Concrete type and interface must both be DI-resolvable. Without the
+        // fix, neither is registered -- DTZeroJsonTypeInfoResolver then fails
+        // to set CreateObject and the ctor never runs during deserialization.
+        Assert.True(
+            isServiceCheck.IsService(typeof(ExecCtorEntity)),
+            "Generator must register the concrete entity type as a service so the deserializer can resolve it via DI.");
+        Assert.True(
+            isServiceCheck.IsService(typeof(IExecCtorEntity)),
+            "Generator must register the interface -> concrete mapping so factory-method return-types resolve to the entity.");
+    }
+
+    /// <summary>
+    /// End-to-end pin: an [Execute]-only [Factory] class with a DI-requiring
+    /// ctor must round-trip correctly, with the ctor-injected service
+    /// resolved from the client's container after deserialization.
+    /// </summary>
+    /// <remarks>
+    /// This test passes even WITHOUT the FactoryModelBuilder fix because
+    /// DesignClientServerContainers.RegisterFactoryTypes performs a separate
+    /// reflection-based fallback registration. The companion test
+    /// ExecCtorEntity_IsAutoRegisteredByGenerator_ClientSide pins the
+    /// generator-emit behavior directly.
+    /// </remarks>
+    [Fact]
+    public async Task ExecCtorEntity_ServiceArrivesOnClient_AfterExecute()
+    {
+        var (server, client, _) = DesignClientServerContainers.Scopes(
+            configureServer: s => s.AddScoped<ITenantTokenService>(_ => new TenantTokenService("server-token")),
+            configureClient: c => c.AddScoped<ITenantTokenService>(_ => new TenantTokenService("client-token")));
+
+        var factory = client.GetRequiredService<IExecCtorEntityFactory>();
+        var entity = await factory.Open(42);
+
+        Assert.NotNull(entity);
+        Assert.Equal(42, entity!.Id);
+        Assert.Equal("Opened_42", entity.Name);
+
+        // If the entity isn't auto-registered on the client, deserialization
+        // bypasses the ctor and _tokens is null -- this assertion catches it.
+        Assert.Equal("client-token", entity.TokenFromContext);
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    /// <summary>
+    /// The ordinal array follows PropertyNames: ordinal name order, not declaration
+    /// order, and only properties with a setter the other side can call. Order's
+    /// get-only Total is not written. The array sits under $values, beside the $id
+    /// a later reference to the same Order would name (#22).
+    /// </summary>
+    [Fact]
+    public void Order_OrdinalShape_FollowsPropertyNames()
+    {
+        var (server, client, local) = DesignClientServerContainers.Scopes(format: SerializationFormat.Ordinal);
+        var order = server.GetRequiredService<IOrderFactory>().Create("Ordinal_Customer");
+        var serializer = server.GetRequiredService<IDTZeroJsonSerializer>();
+
+        using var json = JsonDocument.Parse(serializer.Serialize(order)!);
+        var values = json.RootElement.GetProperty("$values");
+
+        Assert.Equal(["CustomerName", "Id", "IsDeleted", "IsNew", "Lines", "Status"], Order.PropertyNames);
+        Assert.Equal("1", json.RootElement.GetProperty("$id").GetString());
+        Assert.Equal(JsonValueKind.Array, values.ValueKind);
+        Assert.Equal(Order.PropertyNames.Length, values.GetArrayLength());
+        Assert.Equal("Ordinal_Customer", values[0].GetString());
+        Assert.True(values[3].GetBoolean());   // IsNew
+
+        server.Dispose();
+        client.Dispose();
+        local.Dispose();
+    }
+
+    /// <summary>
+    /// An interface-typed property (Order.Lines is IOrderLineList) is written with
+    /// its concrete type's full name, so the other side knows what to build.
+    /// </summary>
+    [Theory]
+    [InlineData(SerializationFormat.Ordinal)]
+    [InlineData(SerializationFormat.Named)]
+    public void Order_LinesInterface_CrossesAsTypeAndValue(SerializationFormat format)
+    {
+        var (server, client, local) = DesignClientServerContainers.Scopes(format: format);
+        var order = server.GetRequiredService<IOrderFactory>().Create("Interface_Customer");
+        var serializer = server.GetRequiredService<IDTZeroJsonSerializer>();
+
+        using var json = JsonDocument.Parse(serializer.Serialize(order)!);
+        var lines = format == SerializationFormat.Ordinal
+            ? json.RootElement.GetProperty("$values")[Array.IndexOf(Order.PropertyNames, "Lines")]
+            : json.RootElement.GetProperty("Lines");
+
+        Assert.Equal(typeof(OrderLineList).FullName, lines.GetProperty("$type").GetString());
+        Assert.True(lines.TryGetProperty("$value", out _));
+
+        server.Dispose();
+        client.Dispose();
+        local.Dispose();
+    }
+}

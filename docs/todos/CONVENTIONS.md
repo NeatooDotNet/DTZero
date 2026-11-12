@@ -1,0 +1,45 @@
+# Todo Conventions
+
+This directory holds iterative todos managed with the `iterative-todo` workflow
+(durable todo container + small amendable plans + append-only Discovery Log).
+
+## Structure
+
+```
+docs/todos/
+  CONVENTIONS.md                  # this file
+  _ids.md                         # ID registry — one row per todo, IDs never reused
+  {ID}-{kebab-name}/              # one folder per active todo
+    todo.md                       # goal, acceptance, Plan Index, Discovery Log
+    plans/{NNN}-{short-name}.md   # monotonic numbering; Abandoned/Retired kept
+    reviews/                      # gate output + build/test logs (logs gitignored)
+  completed/{ID}-{kebab-name}/    # finished todos move here, ID prefix preserved
+```
+
+## IDs
+
+- 3–5 uppercase letters, assigned at todo creation, registered in `_ids.md`.
+- Unique forever — retired IDs are never reused.
+- Cross-reference plans as `{ID}-{NNN}` (e.g. `TRIM-004`), never bare `Plan 004`.
+
+## Branching (this repo)
+
+- Each todo gets a branch named `{ID}` off `main`; todo/plan documentation commits
+  land there.
+- Each plan's implementation gets its own branch `{ID}-{NNN}-{short-name}` off the
+  todo branch.
+- **Plan PRs target their arc branch `{ID}`; the arc PRs to `main` at close-out.**
+- **CI does not run on plan PRs, deliberately.** `build.yml`'s `pull_request` trigger
+  watches `main` only, so the arc → `main` PR is the single CI gate for the whole arc.
+  Do not widen the trigger to arc branches. Per-plan verification is the Step 5 gate's
+  local full-suite run, whose logs live in the todo's `reviews/{NNN}-build.log` and
+  `reviews/{NNN}-test.log` — a plan does not reach Done without them.
+- After the arc merges, pull `main` back into any live arc branch and continue.
+- A plan branch that must build on an unmerged predecessor stacks on it
+  (`{ID}-{NNN}` off `{ID}-{MMM}`) rather than off the arc branch; record the stack in
+  the plan's Notes and merge in order.
+
+## Commits
+
+Conventional commits per the repo root `CLAUDE.md` (`feat:`/`fix:` drive release
+notes; `docs:`/`test:`/`chore:` are omitted). Todo bookkeeping commits use `docs(todo):`.

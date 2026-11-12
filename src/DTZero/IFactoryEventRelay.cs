@@ -1,0 +1,36 @@
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
+namespace DTZero;
+
+/// <summary>
+/// Client-side integration hook for receiving factory events relayed from the server.
+/// Consumers implement this interface to bridge events to their own event aggregator
+/// (MediatR, plain aggregator, UI message bus, etc.) and own any threading / SyncContext
+/// marshaling inside <see cref="Relay"/>.
+///
+/// DTZero guarantees <see cref="Relay"/> is invoked fire-and-forget strictly
+/// <b>after</b> the call returns to its caller and the caller's continuation
+/// has resumed. Exceptions thrown by <see cref="Relay"/> are isolated — they are caught
+/// and logged, and never propagate to the caller.
+///
+/// One remote round-trip produces exactly one <see cref="Relay"/> invocation (the batch
+/// may be empty). There are two kinds of round-trip: a <c>[Remote]</c> factory call, and
+/// a client-initiated <see cref="IFactoryEvents.Raise{T}"/>. When deserialization of a
+/// relayed event fails, the batch is aborted and <see cref="Relay"/> is not invoked for
+/// that call.
+///
+/// A client-initiated <c>Raise</c> receives its own event back in the batch, because
+/// raising from the client dispatches nothing locally — the relay has not otherwise seen
+/// it. Pass <see cref="RaiseOptions.ServerOnly"/> to suppress that.
+/// </summary>
+public interface IFactoryEventRelay
+{
+    /// <summary>
+    /// Receive the batch of events captured during the preceding remote round-trip —
+    /// a <c>[Remote]</c> factory call or a client-initiated <see cref="IFactoryEvents.Raise{T}"/>.
+    /// Invoked fire-and-forget after the caller's continuation has resumed.
+    /// </summary>
+    /// <param name="events">Fully deserialized events in the order they were raised on the server.</param>
+    Task Relay(IReadOnlyList<FactoryEventBase> events);
+}

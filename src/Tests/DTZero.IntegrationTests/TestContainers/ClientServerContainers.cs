@@ -1,0 +1,500 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using DTZero;
+using DTZero.Internal;
+using DTZeroTests.IntegrationTests.Logging;
+using DTZeroTests.IntegrationTests.Shared;
+using DTZeroTests.IntegrationTests.TestTargets.Authorization;
+using DTZeroTests.IntegrationTests.TestTargets.Events;
+using DTZeroTests.IntegrationTests.TestTargets.Execute;
+using System.Collections.Concurrent;
+using System.Reflection;
+using System.Text.Json;
+
+namespace DTZeroTests.IntegrationTests.TestContainers;
+
+/// <summary>
+/// Holds reference to the server provider for client-to-server communication.
+/// </summary>
+public class ServerServiceProvider
+{
+    public IServiceProvider serverProvider { get; set; } = null!;
+}
+
+/// <summary>
+/// Implementation of IMakeRemoteDelegateRequest that serializes through JSON
+/// to simulate the client-server boundary without HTTP.
+/// </summary>
+internal sealed class MakeSerializedServerStandinDelegateRequest : IMakeRemoteDelegateRequest
+{
+    private readonly IDTZeroJsonSerializer _dtZeroJsonSerializer;
+    private readonly IServiceProvider _serviceProvider;
+
+    public MakeSerializedServerStandinDelegateRequest(
+        IDTZeroJsonSerializer dtZeroJsonSerializer,
+        IServiceProvider serviceProvider)
+    {
+        _dtZeroJsonSerializer = dtZeroJsonSerializer;
+        _serviceProvider = serviceProvider;
+    }
+
+    public async Task<T> ForDelegate<T>(Type delegateType, object?[]? parameters, CancellationToken cancellationToken)
+    {
+        var result = await ForDelegateNullable<T>(delegateType, parameters, cancellationToken);
+        if (result == null)
+        {
+            throw new InvalidOperationException("The result of the remote delegate call was null, but a non-nullable type was expected.");
+        }
+        return result;
+    }
+
+    public async Task<T?> ForDelegateNullable<T>(Type delegateType, object?[]? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _serviceProvider.GetRequiredService<RemoteCallCounter>().Increment();
+
+        // Serialize the request (client side)
+        var remoteRequest = _dtZeroJsonSerializer.ToRemoteDelegateRequest(delegateType, parameters);
+        var json = JsonSerializer.Serialize(remoteRequest);
+        var remoteRequestOnServer = JsonSerializer.Deserialize<RemoteRequestDto>(json)!;
+
+        // Execute on server (simulated)
+        var remoteResponseOnServer = await _serviceProvider
+            .GetRequiredService<ServerServiceProvider>()
+            .serverProvider
+            .GetRequiredService<HandleRemoteDelegateRequest>()(remoteRequestOnServer, cancellationToken);
+
+        // Deserialize the response
+        json = JsonSerializer.Serialize(remoteResponseOnServer);
+        var result = JsonSerializer.Deserialize<RemoteResponseDto>(json)!;
+
+        var deserialized = _dtZeroJsonSerializer.DeserializeRemoteResponse<T>(result);
+
+        DispatchRelay(result);
+
+        return deserialized;
+    }
+
+    public async Task ForDelegateEvent(Type delegateType, object?[]? parameters, CancellationToken cancellationToken)
+    {
+        _serviceProvider.GetRequiredService<RemoteCallCounter>().Increment();
+
+        var remoteRequest = _dtZeroJsonSerializer.ToRemoteDelegateRequest(delegateType, parameters);
+        var json = JsonSerializer.Serialize(remoteRequest);
+        var remoteRequestOnServer = JsonSerializer.Deserialize<RemoteRequestDto>(json)!;
+
+        var remoteResponseOnServer = await _serviceProvider
+            .GetRequiredService<ServerServiceProvider>()
+            .serverProvider
+            .GetRequiredService<HandleRemoteDelegateRequest>()(remoteRequestOnServer, cancellationToken);
+
+        // A client-initiated Raise relays exactly like a [Remote] factory call — the server
+        // builds the batch either way. Round-trip through JSON first so the relayed events
+        // cross the same serialization boundary the factory path puts them through.
+        json = JsonSerializer.Serialize(remoteResponseOnServer);
+        var result = JsonSerializer.Deserialize<RemoteResponseDto>(json)!;
+
+        DispatchRelay(result);
+    }
+
+    /// <summary>
+    /// Fire-and-forget relay using the same Task.Run + Task.Yield pattern as production
+    /// <see cref="MakeRemoteDelegateRequest"/> so timing tests observe production-equivalent
+    /// ordering.
+    /// </summary>
+    /// <remarks>
+    /// Shared by both call paths deliberately. The production bug this mirrors was a
+    /// divergence between them — <c>ForDelegateEvent</c> discarded the response while
+    /// <c>ForDelegateNullable</c> relayed it — so the shim keeps one implementation for both.
+    /// </remarks>
+    private void DispatchRelay(RemoteResponseDto? response)
+    {
+        var relay = _serviceProvider.GetService<IFactoryEventRelay>();
+        if (relay == null || response == null)
+        {
+            return;
+        }
+
+        var rawEvents = response.RelayedEvents;
+        var serializer = _dtZeroJsonSerializer;
+#pragma warning disable CA1031 // Relay exceptions must never propagate to the factory caller.
+        _ = Task.Run(async () =>
+        {
+            await Task.Yield();
+            IReadOnlyList<FactoryEventBase> events;
+            try
+            {
+                events = rawEvents is { Count: > 0 }
+                    ? FactoryEventDeserializer.Deserialize(rawEvents, serializer)
+                    : Array.Empty<FactoryEventBase>();
+            }
+            catch (Exception)
+            {
+                return;
+            }
+
+            try
+            {
+                await relay.Relay(events).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Relay exceptions must not propagate to the factory caller.
+            }
+        }, CancellationToken.None);
+#pragma warning restore CA1031
+    }
+}
+
+/// <summary>
+/// Creates isolated client, server, and local containers for integration testing.
+/// This simulates the full client-server round-trip with JSON serialization.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Destructuring order is not uniform.</b> <see cref="Scopes()"/> and
+/// <see cref="ScopesWithLogging"/> return <c>(server, client, local)</c>; the
+/// configure-callback overload returns <c>(client, server, local)</c>. Every element is
+/// an <see cref="IServiceScope"/> and tuple element names are erased at runtime, so
+/// getting this wrong compiles, runs, and quietly exercises the wrong container —
+/// which has already happened once (<c>FactoryEventHandlerLocalTests.CreateScopes</c>
+/// declared the names backwards for its whole life). <c>ClientServerContainersOrderTests</c>
+/// pins all three orders; consult it rather than counting on a habit.
+/// </para>
+/// <para>
+/// <b>Test-isolation disciplines this harness depends on.</b> Neither is enforced by
+/// code, and both bite silently:
+/// </para>
+/// <para>
+/// 1. <see cref="DTZero.FactoryEventHandlerRegistry"/> is process-global
+/// with (event type, handler class) first-registration-wins dedupe, and it has
+/// <b>no reset method at all</b> — PHASE-011 deleted the internal <c>Clear()</c>,
+/// because the registry is process-wide static and xUnit runs test classes in
+/// parallel, so calling it strips registrations out from under whatever else is
+/// mid-run. A test that hand-registers a
+/// handler for an event type another test also uses gets whichever registration
+/// happened to run first — usually the other test's. The convention throughout this
+/// suite is therefore one freshly-declared event type per test; PHASE-006 added five
+/// more following it.
+/// </para>
+/// <para>
+/// 2. <c>IEventTestService</c> is registered as a SINGLETON so a handler running in the
+/// server scope can be observed from a test holding a different scope. That makes its
+/// recorded events shared across every test in the run, so assertions must filter by an
+/// id the test itself generated (<c>Guid.NewGuid()</c>) rather than by event name alone.
+/// An unfiltered count assertion passes or fails depending on what else ran.
+/// </para>
+/// </remarks>
+public static class ClientServerContainers
+{
+    private static readonly object LockContainer = new();
+    private static readonly ConcurrentDictionary<SerializationFormat, (IServiceProvider server, IServiceProvider client, IServiceProvider local)> FormatContainers = new();
+
+    /// <summary>
+    /// Creates scopes using the Ordinal serialization format (production default).
+    /// </summary>
+    public static (IServiceScope server, IServiceScope client, IServiceScope local) Scopes()
+    {
+        return Scopes(SerializationFormat.Ordinal);
+    }
+
+    /// <summary>
+    /// Creates scopes using the specified serialization format.
+    /// </summary>
+    public static (IServiceScope server, IServiceScope client, IServiceScope local) Scopes(SerializationFormat format)
+    {
+        var containers = FormatContainers.GetOrAdd(format, CreateContainers);
+
+        var serverScope = containers.server.CreateScope();
+        var clientScope = containers.client.CreateScope();
+        var localScope = containers.local.CreateScope();
+
+        lock (LockContainer)
+        {
+            clientScope.GetRequiredService<ServerServiceProvider>().serverProvider = serverScope.ServiceProvider;
+        }
+
+        return (serverScope, clientScope, localScope);
+    }
+
+    /// <summary>
+    /// Creates scopes with custom service configuration for client and server.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>(client, server, local)</c> — the reverse of the other two factories'
+    /// first two elements. See the type-level remarks; pinned by
+    /// <c>ClientServerContainersOrderTests</c>.
+    /// </remarks>
+    public static (IServiceScope client, IServiceScope server, IServiceScope local) Scopes(
+        Action<IServiceCollection>? configureClient = null,
+        Action<IServiceCollection>? configureServer = null,
+        Action<IServiceCollection>? configureLocal = null)
+    {
+        var serializationOptions = new DTZeroSerializationOptions { Format = SerializationFormat.Ordinal };
+
+        var serverCollection = new ServiceCollection();
+        var clientCollection = new ServiceCollection();
+        var localCollection = new ServiceCollection();
+
+        // Add base configuration
+        ConfigureContainer(serverCollection, DTZeroFactory.Server, serializationOptions);
+        ConfigureContainer(clientCollection, DTZeroFactory.Remote, serializationOptions);
+        ConfigureContainer(localCollection, DTZeroFactory.Logical, serializationOptions);
+
+        // Client needs server provider reference
+        clientCollection.AddScoped<ServerServiceProvider>();
+        clientCollection.AddScoped<IMakeRemoteDelegateRequest, MakeSerializedServerStandinDelegateRequest>();
+
+        // Apply custom configuration
+        configureServer?.Invoke(serverCollection);
+        configureClient?.Invoke(clientCollection);
+        configureLocal?.Invoke(localCollection);
+
+        var serverProvider = serverCollection.BuildServiceProvider();
+        var clientProvider = clientCollection.BuildServiceProvider();
+        var localProvider = localCollection.BuildServiceProvider();
+
+        var serverScope = serverProvider.CreateScope();
+        var clientScope = clientProvider.CreateScope();
+        var localScope = localProvider.CreateScope();
+
+        lock (LockContainer)
+        {
+            clientScope.GetRequiredService<ServerServiceProvider>().serverProvider = serverScope.ServiceProvider;
+        }
+
+        return (clientScope, serverScope, localScope);
+    }
+
+    /// <summary>
+    /// Creates scopes with a TestLoggerProvider for capturing log messages.
+    /// </summary>
+    public static (IServiceScope server, IServiceScope client, IServiceScope local) ScopesWithLogging(out Logging.TestLoggerProvider loggerProvider)
+    {
+        var provider = new Logging.TestLoggerProvider();
+        loggerProvider = provider;
+
+        var serializationOptions = new DTZeroSerializationOptions { Format = SerializationFormat.Ordinal };
+
+        var serverCollection = new ServiceCollection();
+        var clientCollection = new ServiceCollection();
+        var localCollection = new ServiceCollection();
+
+        // Add logging with the test logger provider
+        serverCollection.AddLogging(builder => builder.AddProvider(provider).SetMinimumLevel(LogLevel.Trace));
+        serverCollection.AddSingleton<IHostApplicationLifetime, TestHostApplicationLifetime>();
+        clientCollection.AddLogging(builder => builder.AddProvider(provider).SetMinimumLevel(LogLevel.Trace));
+        clientCollection.AddSingleton<IHostApplicationLifetime, TestHostApplicationLifetime>();
+        localCollection.AddLogging(builder => builder.AddProvider(provider).SetMinimumLevel(LogLevel.Trace));
+        localCollection.AddSingleton<IHostApplicationLifetime, TestHostApplicationLifetime>();
+
+        // Register test services
+        RegisterFactoryTypes(serverCollection);
+        RegisterFactoryTypes(clientCollection);
+        RegisterFactoryTypes(localCollection);
+
+        // Register authorization types
+        RegisterAuthorizationTypes(serverCollection);
+        RegisterAuthorizationTypes(clientCollection);
+        RegisterAuthorizationTypes(localCollection);
+
+        serverCollection.AddScoped<IService, Service>();
+        serverCollection.AddScoped<IService2, Service2>();
+        serverCollection.AddScoped<IService3, Service3>();
+        serverCollection.AddSingleton<IServerOnlyService, ServerOnly>();
+        localCollection.AddScoped<IService, Service>();
+        localCollection.AddScoped<IService2, Service2>();
+        localCollection.AddScoped<IService3, Service3>();
+        localCollection.AddSingleton<IServerOnlyService, ServerOnly>();
+
+        // Register event test services as singleton for event tracking across scopes
+        serverCollection.AddSingleton<IEventTestService, EventTestService>();
+        localCollection.AddSingleton<IEventTestService, EventTestService>();
+
+        // Scoped probe for [FactoryEventHandler] shared-scope tests — a fresh
+        // instance per DI scope so tests can assert the handler resolves the same
+        // IScopeProbe the caller did.
+        serverCollection.AddScoped<IScopeProbe, ScopeProbe>();
+        localCollection.AddScoped<IScopeProbe, ScopeProbe>();
+
+        serverCollection.AddSingleton<IVoidExecuteRecorder, VoidExecuteRecorder>();
+        localCollection.AddSingleton<IVoidExecuteRecorder, VoidExecuteRecorder>();
+
+        // Configure DTZero for each mode
+        serverCollection.AddDTZero(DTZeroFactory.Server, serializationOptions, Assembly.GetExecutingAssembly());
+        serverCollection.RegisterMatchingName(Assembly.GetExecutingAssembly());
+
+        clientCollection.AddDTZero(DTZeroFactory.Remote, serializationOptions, Assembly.GetExecutingAssembly());
+        clientCollection.AddScoped<ServerServiceProvider>();
+        clientCollection.AddScoped<IMakeRemoteDelegateRequest, MakeSerializedServerStandinDelegateRequest>();
+        clientCollection.RegisterMatchingName(Assembly.GetExecutingAssembly());
+
+        localCollection.AddDTZero(DTZeroFactory.Logical, serializationOptions, Assembly.GetExecutingAssembly());
+        localCollection.RegisterMatchingName(Assembly.GetExecutingAssembly());
+
+        var serverProvider = serverCollection.BuildServiceProvider();
+        var clientProvider = clientCollection.BuildServiceProvider();
+        var localProvider = localCollection.BuildServiceProvider();
+
+        var serverScope = serverProvider.CreateScope();
+        var clientScope = clientProvider.CreateScope();
+        var localScope = localProvider.CreateScope();
+
+        lock (LockContainer)
+        {
+            clientScope.GetRequiredService<ServerServiceProvider>().serverProvider = serverScope.ServiceProvider;
+        }
+
+        return (serverScope, clientScope, localScope);
+    }
+
+    private static void ConfigureContainer(IServiceCollection services, DTZeroFactory mode, DTZeroSerializationOptions serializationOptions)
+    {
+        services.AddLogging(builder => builder.AddProvider(NullLoggerProvider.Instance));
+        services.AddSingleton<IHostApplicationLifetime, TestHostApplicationLifetime>();
+
+        RegisterFactoryTypes(services);
+        RegisterAuthorizationTypes(services);
+
+        if (mode != DTZeroFactory.Remote)
+        {
+            services.AddScoped<IService, Service>();
+            services.AddScoped<IService2, Service2>();
+            services.AddScoped<IService3, Service3>();
+            services.AddSingleton<IServerOnlyService, ServerOnly>();
+            services.AddSingleton<IEventTestService, EventTestService>();
+            services.AddScoped<IScopeProbe, ScopeProbe>();
+            services.AddSingleton<IVoidExecuteRecorder, VoidExecuteRecorder>();
+        }
+
+        services.AddDTZero(mode, serializationOptions, Assembly.GetExecutingAssembly());
+        services.RegisterMatchingName(Assembly.GetExecutingAssembly());
+    }
+
+    private static (IServiceProvider server, IServiceProvider client, IServiceProvider local) CreateContainers(SerializationFormat format)
+    {
+        var serializationOptions = new DTZeroSerializationOptions { Format = format };
+
+        var serverCollection = new ServiceCollection();
+        var clientCollection = new ServiceCollection();
+        var localCollection = new ServiceCollection();
+
+        // Add logging and IHostApplicationLifetime
+        serverCollection.AddLogging(builder => builder.AddProvider(NullLoggerProvider.Instance));
+        serverCollection.AddSingleton<IHostApplicationLifetime, TestHostApplicationLifetime>();
+        clientCollection.AddLogging(builder => builder.AddProvider(NullLoggerProvider.Instance));
+        clientCollection.AddSingleton<IHostApplicationLifetime, TestHostApplicationLifetime>();
+        localCollection.AddLogging(builder => builder.AddProvider(NullLoggerProvider.Instance));
+        localCollection.AddSingleton<IHostApplicationLifetime, TestHostApplicationLifetime>();
+
+        // Register test services
+        RegisterFactoryTypes(serverCollection);
+        RegisterFactoryTypes(clientCollection);
+        RegisterFactoryTypes(localCollection);
+
+        // Register authorization types
+        RegisterAuthorizationTypes(serverCollection);
+        RegisterAuthorizationTypes(clientCollection);
+        RegisterAuthorizationTypes(localCollection);
+
+        serverCollection.AddScoped<IService, Service>();
+        serverCollection.AddScoped<IService2, Service2>();
+        serverCollection.AddScoped<IService3, Service3>();
+        serverCollection.AddSingleton<IServerOnlyService, ServerOnly>();
+        localCollection.AddScoped<IService, Service>();
+        localCollection.AddScoped<IService2, Service2>();
+        localCollection.AddScoped<IService3, Service3>();
+        localCollection.AddSingleton<IServerOnlyService, ServerOnly>();
+
+        // Register event test services as singleton for event tracking across scopes
+        serverCollection.AddSingleton<IEventTestService, EventTestService>();
+        localCollection.AddSingleton<IEventTestService, EventTestService>();
+
+        // Scoped probe for [FactoryEventHandler] shared-scope tests — a fresh
+        // instance per DI scope so tests can assert the handler resolves the same
+        // IScopeProbe the caller did.
+        serverCollection.AddScoped<IScopeProbe, ScopeProbe>();
+        localCollection.AddScoped<IScopeProbe, ScopeProbe>();
+
+        serverCollection.AddSingleton<IVoidExecuteRecorder, VoidExecuteRecorder>();
+        localCollection.AddSingleton<IVoidExecuteRecorder, VoidExecuteRecorder>();
+
+        // Configure DTZero for each mode
+        serverCollection.AddDTZero(DTZeroFactory.Server, serializationOptions, Assembly.GetExecutingAssembly());
+        serverCollection.RegisterMatchingName(Assembly.GetExecutingAssembly());
+
+        clientCollection.AddDTZero(DTZeroFactory.Remote, serializationOptions, Assembly.GetExecutingAssembly());
+        clientCollection.AddScoped<ServerServiceProvider>();
+        clientCollection.AddScoped<IMakeRemoteDelegateRequest, MakeSerializedServerStandinDelegateRequest>();
+        clientCollection.RegisterMatchingName(Assembly.GetExecutingAssembly());
+
+        localCollection.AddDTZero(DTZeroFactory.Logical, serializationOptions, Assembly.GetExecutingAssembly());
+        localCollection.RegisterMatchingName(Assembly.GetExecutingAssembly());
+
+        return (
+            serverCollection.BuildServiceProvider(),
+            clientCollection.BuildServiceProvider(),
+            localCollection.BuildServiceProvider()
+        );
+    }
+
+    /// <summary>
+    /// Registers all types decorated with [Factory] attribute as scoped services.
+    /// This is infrastructure reflection (DI registration), which is acceptable.
+    /// </summary>
+    private static void RegisterFactoryTypes(IServiceCollection services)
+    {
+        // Every container path calls this for every collection, so it is the one place to give
+        // each scope its wire-crossing counter (see RemoteCallCounter).
+        services.AddScoped<RemoteCallCounter>();
+
+        foreach (var type in Assembly.GetExecutingAssembly().GetTypes())
+        {
+            if (type.GenericTypeArguments.Length > 0 || type.IsAbstract)
+                continue;
+
+            if (type.GetCustomAttribute<FactoryAttribute>() == null)
+                continue;
+
+            // Skip records (they have a compiler-generated <Clone>$ method)
+            if (type.GetMethod("<Clone>$") != null)
+                continue;
+
+            services.AddScoped(type);
+        }
+    }
+
+    /// <summary>
+    /// Registers all authorization types decorated with [AuthorizeFactory] attribute.
+    /// This is infrastructure reflection (DI registration), which is acceptable.
+    /// </summary>
+    private static void RegisterAuthorizationTypes(IServiceCollection services)
+    {
+        foreach (var type in Assembly.GetExecutingAssembly().GetTypes())
+        {
+            var attr = type.GetCustomAttribute(typeof(AuthorizeFactoryAttribute<>));
+            if (attr == null)
+                continue;
+
+            var authType = attr.GetType().GetGenericArguments()[0];
+            if (!authType.IsInterface)
+            {
+                services.AddScoped(authType);
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Extension methods for IServiceScope.
+/// </summary>
+public static class ServiceScopeExtensions
+{
+    public static T GetRequiredService<T>(this IServiceScope scope) where T : class
+    {
+        return scope.ServiceProvider.GetRequiredService<T>();
+    }
+}

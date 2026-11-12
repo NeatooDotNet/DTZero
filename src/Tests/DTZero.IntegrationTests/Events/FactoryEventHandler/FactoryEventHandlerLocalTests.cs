@@ -1,0 +1,113 @@
+using Microsoft.Extensions.DependencyInjection;
+using DTZero;
+using DTZeroTests.IntegrationTests.TestContainers;
+using DTZeroTests.IntegrationTests.TestTargets.Events;
+
+namespace DTZeroTests.IntegrationTests.Events.FactoryEventHandler;
+
+/// <summary>
+/// Tests for [FactoryEventHandler] local dispatch (Server/Logical mode).
+/// </summary>
+public class FactoryEventHandlerLocalTests
+{
+    // (client, server, local) — matching what this ClientServerContainers overload
+    // actually returns. The names used to read (server, client, ...), which the
+    // compiler happily accepts because tuple element names are erased: every test below
+    // destructures positionally and was therefore correct, while anyone reading the
+    // signature would have written the two the wrong way round.
+    private static (IServiceScope client, IServiceScope server, IServiceScope local) CreateScopes()
+    {
+        return ClientServerContainers.Scopes(
+            configureClient: null,
+            configureServer: null);
+    }
+
+    [Fact]
+    public async Task Raise_SingleHandlerType_HandlerFires()
+    {
+        var (client, server, local) = CreateScopes();
+        var events = server.GetRequiredService<IFactoryEvents>();
+        var testService = server.GetRequiredService<IEventTestService>();
+
+        var entityId = Guid.NewGuid();
+        await events.Raise(new TestAuditEvent(entityId));
+
+        // Raise is sequential-awaited — handlers have already run by now.
+        var recorded = testService.GetRecordedEvents();
+        Assert.Contains(recorded, e => e.EventName == "AuditHandler" && e.EntityId == entityId);
+    }
+
+    [Fact]
+    public async Task Raise_MultipleHandlers_AllFire()
+    {
+        var (client, server, local) = CreateScopes();
+        var events = server.GetRequiredService<IFactoryEvents>();
+        var testService = server.GetRequiredService<IEventTestService>();
+
+        var orderId = Guid.NewGuid();
+        await events.Raise(new TestOrderEvent(orderId, "test@example.com"));
+
+        var recorded = testService.GetRecordedEvents();
+        Assert.Contains(recorded, e => e.EventName == "HandlerA" && e.EntityId == orderId);
+        Assert.Contains(recorded, e => e.EventName == "HandlerB" && e.EntityId == orderId);
+    }
+
+    [Fact]
+    public async Task Raise_NoHandlers_CompletesWithoutError()
+    {
+        var (client, server, local) = CreateScopes();
+        var events = server.GetRequiredService<IFactoryEvents>();
+
+        // Should complete without throwing
+        await events.Raise(new TestUnhandledEvent());
+    }
+
+    [Fact]
+    public async Task Raise_DifferentEventTypes_StrictRouting()
+    {
+        var (client, server, local) = CreateScopes();
+        var events = server.GetRequiredService<IFactoryEvents>();
+        var testService = server.GetRequiredService<IEventTestService>();
+
+        var auditId = Guid.NewGuid();
+        await events.Raise(new TestAuditEvent(auditId));
+
+        var recorded = testService.GetRecordedEvents();
+        // AuditHandler should fire
+        Assert.Contains(recorded, e => e.EventName == "AuditHandler" && e.EntityId == auditId);
+        // OrderHandlers should NOT fire for TestAuditEvent
+        Assert.DoesNotContain(recorded, e => e.EventName == "HandlerA");
+        Assert.DoesNotContain(recorded, e => e.EventName == "HandlerB");
+    }
+
+    [Fact]
+    public async Task Raise_EventProperties_ReceiveCorrectValues()
+    {
+        var (client, server, local) = CreateScopes();
+        var events = server.GetRequiredService<IFactoryEvents>();
+        var testService = server.GetRequiredService<IEventTestService>();
+
+        var orderId = Guid.NewGuid();
+        var email = "verify@example.com";
+        await events.Raise(new TestOrderEvent(orderId, email));
+
+        var recorded = testService.GetRecordedEvents();
+        // HandlerA records the OrderId — verifies the event object arrived with correct data
+        Assert.Contains(recorded, e => e.EventName == "HandlerA" && e.EntityId == orderId);
+    }
+
+    [Fact]
+    public async Task Raise_ServiceInjection_ServicesResolvedCorrectly()
+    {
+        var (client, server, local) = CreateScopes();
+        var events = server.GetRequiredService<IFactoryEvents>();
+        var testService = server.GetRequiredService<IEventTestService>();
+
+        var orderId = Guid.NewGuid();
+        await events.Raise(new TestOrderEvent(orderId, "svc@test.com"));
+
+        // If service injection failed, handlers would throw and no events would be recorded
+        var recorded = testService.GetRecordedEvents();
+        Assert.Contains(recorded, e => e.EventName == "HandlerA" && e.EntityId == orderId);
+    }
+}

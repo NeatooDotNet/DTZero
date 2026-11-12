@@ -1,0 +1,21 @@
+# Todo ID Registry
+
+One row per todo, newest first. IDs are never reused, even after completion or
+abandonment. Move rows to the Completed section together with the folder move.
+
+## Active
+
+| ID | Todo | Created | Location |
+|----|------|---------|----------|
+| DTZ | Rebrand to DTZero | 2026-11-06 | [DTZ-rebrand](./DTZ-rebrand/todo.md) |
+
+## Completed
+
+| ID | Todo | Completed | Location |
+|----|------|-----------|----------|
+| RFSK | Rebuild the DTZero skill around the model and the trap rows | 2026-10-16 | [RFSK-skill-rebuild](./completed/RFSK-skill-rebuild/todo.md) |
+| EXSET | One compiled example set, and the audit against it | 2026-10-15 | [EXSET-example-set-consolidation](./completed/EXSET-example-set-consolidation/todo.md) |
+| DICT | Dictionary and public-field DTO preservation | 2026-10-06 | [DICT-dictionary-dto-preservation](./completed/DICT-dictionary-dto-preservation/todo.md) |
+| EXRM | [Execute] obeys [Remote] | 2026-09-08 | [EXRM-execute-obeys-remote](./completed/EXRM-execute-obeys-remote/todo.md) |
+| PHASE | Phased factory-event dispatch | 2026-08-31 | [PHASE-phased-event-dispatch](./completed/PHASE-phased-event-dispatch/todo.md) |
+| TRIM | DTO trimming preservation gaps | 2026-08-14 | [TRIM-dto-trimming-preservation-gaps](./completed/TRIM-dto-trimming-preservation-gaps/todo.md) |

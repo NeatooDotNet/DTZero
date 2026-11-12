@@ -1,0 +1,179 @@
+# Decision Guide
+
+Quick answers to common "when should I use...?" questions.
+
+---
+
+## When Do I Need [Remote]?
+
+`[Remote]` marks the calls that cross from the client to the server. Once execution crosses to the server, it stays there — subsequent calls don't need `[Remote]`. The question is whether the call has to cross, not whether the client makes it: the client calls plenty of methods that run where they are called.
+
+```
+Does this call need to cross to the server (a data store, a server-only service)?
+├── YES, and the client makes it → Add [Remote]
+├── NO, it runs on the client → No [Remote]
+│   (a root's local [Create], a child's public [Create], a Can* check
+│    whose auth needs no server service, a bare [Execute] with client services)
+└── NO, the caller is already on the server → No [Remote]
+    (a child's Fetch/Insert/Update inside its root's call)
+```
+
+**Examples**:
+- `Order.Fetch(id)` called by a Blazor component → `[Remote, Fetch]`
+- `Order.Create(customerName)` called by a Blazor component → just `[Create]`: it is `new`, and runs on the client
+- `OrderLine.Fetch(row)` called by `Order.Fetch` on the server → just `[Fetch]` (no `[Remote]`)
+- `Order.Insert` reached through `Save()` from the client → `[Remote, Insert]`: the save crosses to reach the store
+
+---
+
+## Which Factory Pattern?
+
+DTZero has three factory patterns. The choice depends on what you're building.
+
+| Pattern | `[Factory]` On | Use When | Example |
+|---------|---------------|----------|---------|
+| **Class Factory** | `internal partial class` behind a `public interface` | Any object the client holds: an entity with a lifecycle, a read model it only loads, a context a screen binds to | `Order`, `OrderLine`, `OrderSummary`, `OrderCheckout` |
+| **Interface Factory** | `public interface` | A domain service the client calls (never a repository) | `IProductCatalog`, `ICustomerDirectory` |
+| **Static Factory** | `public static partial class` | Stateless commands | `ExampleCommands`, `InvoiceFinalizer` |
+
+```
+Does the client hold an instance of this type?
+├── YES → Class Factory
+│   ├── It is created, edited and saved (IsNew, IsDeleted) → an entity
+│   │   (Create/Fetch, then Save routes to Insert/Update/Delete)
+│   ├── It is only loaded and shown → a read model
+│   │   ([Fetch] only, false when missing; no IFactorySaveMeta)
+│   └── A screen binds to it, and its verbs act on an aggregate it holds → a context
+│       (loaded in one [Remote, Fetch]; plain instance-method verbs; saved through the root)
+└── NO
+    ├── Service with multiple methods the client calls → Interface Factory
+    │   (server implementation, client proxy, no operation attributes)
+    └── One-shot command → Static Factory with [Execute]
+```
+
+**Key difference — Interface Factory has no operation attributes.** Class and Static factories use `[Create]`, `[Fetch]`, `[Remote]`, `[Execute]`, etc. to tell the generator what each method does. Interface Factory methods need none of these — the `[Factory]` on the interface is sufficient. Every method is automatically a remote entry point.
+
+See [Interface Factory](interface-factory.md) for the full pattern, [Factory Operations](factory-operations.md) for Class Factory operations, and [Factory Events](factory-events.md) for the mediator + client relay pattern.
+
+---
+
+## Constructor vs Method Injection?
+
+Constructor injection puts services on both client and server. Method injection puts them only where the method executes — typically the server. This is how you control which services are available on each side.
+
+```
+Does the client need this service?
+├── YES (validation, logging, client-side logic)
+│   └── Constructor injection: [Service] on constructor parameter
+└── NO (database, secrets, server-only)
+    └── Method injection: [Service] on method parameter
+```
+
+**Rule of thumb**: Method injection is the common case. Use constructor injection only when clients need the service too.
+
+See [Service Injection](service-injection.md) for details.
+
+---
+
+## Which Serialization Format?
+
+Ordinal is the default. It's compact and fast. Switch to Named if you need to debug payloads — it produces standard JSON with property names.
+
+```
+Use Ordinal (default)
+└── Switch to Named only if you need to debug payloads
+```
+
+See [Serialization](serialization.md) for a practical dev/production configuration pattern.
+
+---
+
+## Do I Need IFactorySaveMeta?
+
+`IFactorySaveMeta` enables the `Save()` routing pattern — one call that routes to Insert, Update, or Delete based on entity state. If your entity only needs `Fetch()`, skip it.
+
+```
+Does your entity support Insert, Update, or Delete via Save()?
+├── YES → Implement IFactorySaveMeta
+│         (adds IsNew, IsDeleted properties)
+└── NO: a read model (only loaded) or a context (saves through the root it holds)
+    └── Don't implement it
+```
+
+See [Save Operation](save-operation.md) for details.
+
+---
+
+## When to Use [Execute]?
+
+`[Execute]` is for operations that don't follow the entity lifecycle (Create → Fetch → Save). Two common scenarios: one-shot command delegates, and static methods where you need to make a decision before instantiating an entity — like choosing Create vs Fetch based on existing data.
+
+```
+Does this operation follow the entity lifecycle (Create/Fetch/Save)?
+├── YES → Use [Create], [Fetch], [Insert], [Update], [Delete]
+└── NO
+    ├── One-shot command → Static class with [Execute]
+    └── Pre-instantiation decision → Static method with [Execute] on the entity
+
+Does it need the server (a repository, a server-only service)?
+├── YES → add [Remote] — the client crosses to the server
+└── NO  → leave [Remote] off — it runs where it is called, with that tier's services
+```
+
+`[Execute]` obeys `[Remote]` like every other operation. A bare `[Execute]` has no remote delegate and no endpoint; it runs on whichever tier resolves it, so it is the shape for client-side computation that must not round-trip.
+
+**Examples**:
+- Generate monthly report → Static command with `[Remote, Execute]`
+- Open a customer's draft order: fetch it if there is one, otherwise create one → `Order.OpenDraft`, a class-level `[Remote, Execute]` that calls Fetch, then Create
+- Score text in the browser with a pure-computation service → Static command with `[Execute]`, no `[Remote]`
+
+See [Factory Operations](factory-operations.md) for details.
+
+---
+
+## How Do I Handle Domain Events?
+
+DTZero's event surface is the `[FactoryEventHandler<T>]` mediator: raise a strongly-typed event via `IFactoryEvents.Raise<T>` inside a factory method; server-side `static` handlers process it sequentially in the caller's DI scope, at the drain point their `DispatchPhase` declares (the default, `Immediate`, means shared `DbContext` and shared transaction at `Raise`); the batch is also relayed to the client via a consumer-implemented `IFactoryEventRelay`.
+
+```
+Does the handler need to participate in the caller's DB transaction?
+├── YES, atomic with the save (staged state is fine)
+│   └── [FactoryEventHandler<T>] with a static method — Immediate, the default
+├── YES, but it needs flushed state (DB-generated keys) first
+│   └── [FactoryEventHandler<T>(DispatchPhase.AfterFlush)] + a coordinator drain
+│       between the factory body's flush and commit
+├── NO — read-only projection that must never fail the save
+│   └── [FactoryEventHandler<T>(DispatchPhase.AfterCommit)]
+└── NO (external system — email, webhook, queue publish)
+    └── Manual Task.Run + IServiceScopeFactory.CreateScope() inside the factory method;
+        explicitly snapshot ambient state (tenant, correlation) before entering the
+        background task. See v1.5.0 release notes for the full pattern.
+```
+
+See [Factory Events](factory-events.md) for the mediator/relay surface, [Dispatch Phases](factory-events.md#dispatch-phases) for the phase contract, and the [v1.5.0 release notes](release-notes/v1.5.0.md) for the fire-and-forget migration pattern.
+
+---
+
+## AuthorizeFactory vs [AspAuthorize]?
+
+Use whichever fits your situation. `AuthorizeFactory` gives you a unified authorization layer that works on both client and server with full DI support. `[AspAuthorize]` applies standard ASP.NET Core policies — use it if that already fits your enterprise's broader auth model. You can mix both on the same entity.
+
+```
+What fits your auth model?
+├── Domain-specific rules with DI → [AuthorizeFactory<T>]
+├── ASP.NET Core policies/roles already in use → [AspAuthorize]
+└── Both → Combine them (both checks must pass)
+```
+
+See [Authorization](authorization.md) for details.
+
+---
+
+## Next Steps
+
+- [Interface Factory](interface-factory.md) — Remote service proxy pattern
+- [Attributes Reference](attributes-reference.md) — Complete attribute documentation
+- [Client-Server Architecture](client-server-architecture.md) — Understanding `[Remote]`
+- [Service Injection](service-injection.md) — DI patterns
+- [Factory Modes](factory-modes.md) — Runtime modes (Server, Remote, Logical)
+- [IL Trimming](trimming.md) — Remove server-only code from published Blazor WASM output

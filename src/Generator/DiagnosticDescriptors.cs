@@ -1,0 +1,297 @@
+using Microsoft.CodeAnalysis;
+
+namespace DTZero.Generator;
+
+/// <summary>
+/// Contains all diagnostic descriptors for the DTZero source generator.
+/// </summary>
+internal static class DiagnosticDescriptors
+{
+    // Category constants
+    private const string CategoryUsage = "DTZero.Usage";
+
+    /// <summary>
+    /// NF0101: Static class must be declared as partial to generate Execute delegates.
+    /// </summary>
+    public static readonly DiagnosticDescriptor ClassMustBePartial = new(
+        id: "NF0101",
+        title: "Class must be partial for factory generation",
+        messageFormat: "Static class '{0}' must be declared as partial to generate Execute delegates",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "When using static Execute operations, the containing class must be partial so the generator can add delegate definitions.");
+
+    /// <summary>
+    /// NF0102: Execute method must return Task or Task&lt;T&gt;.
+    /// </summary>
+    public static readonly DiagnosticDescriptor ExecuteMustReturnTask = new(
+        id: "NF0102",
+        title: "Execute method must return Task",
+        messageFormat: "Execute method '{0}' must return Task or Task<T>, not '{1}'",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Execute operations are request-response: the caller awaits a result whether the call runs locally or crosses to the server, so every [Execute] returns Task or Task<TResult>, with or without [Remote]. Change the return type to Task or Task<TResult>.");
+
+    /// <summary>
+    /// NF0103: Execute method must be a static method.
+    /// </summary>
+    public static readonly DiagnosticDescriptor ExecuteRequiresStaticMethod = new(
+        id: "NF0103",
+        title: "Execute method must be static",
+        messageFormat: "Execute method '{0}' must be a static method",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Execute operations must be static methods. On static classes, the method generates a delegate type. On non-static classes, the method generates a factory interface method.");
+
+    /// <summary>
+    /// NF0105: [Remote] cannot be used with public methods.
+    /// </summary>
+    public static readonly DiagnosticDescriptor RemotePublicContradiction = new(
+        id: "NF0105",
+        title: "[Remote] cannot be used with public methods",
+        messageFormat: "Method '{0}' is marked [Remote] but has public accessibility. [Remote] methods must be internal to enable IL trimming on client assemblies.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "[Remote] methods should be internal because clients call through the generated factory interface, not the method directly. Making them public defeats IL trimming because the linker cannot remove the method body from client assemblies.");
+
+    /// <summary>
+    /// NF0106: Factory-operation attribute on an interface factory method.
+    /// </summary>
+    public static readonly DiagnosticDescriptor OperationAttributeOnInterfaceMethod = new(
+        id: "NF0106",
+        title: "Factory-operation attribute on interface factory method",
+        messageFormat: "Interface factory method '{0}' has attribute '[{1}]'. Interface factory methods must have no operation attributes — the interface IS the remote boundary. See Anti-Pattern 2 in CLAUDE-DESIGN.md / docs/interface-factory.md.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A [Factory]-attributed interface declares a remote contract; every method is implicitly a remote call. Placing [Create], [Fetch], [Insert], [Update], [Delete], or [Execute] on an interface method causes duplicate generation and compile errors in downstream code. Remove the attribute from the interface method. Scoped authorization on interface factories uses [AuthorizeFactory(Execute)] / [AuthorizeFactory(Read)] on auth-class methods with parameter matching — see AuthorizedRepository.cs.");
+
+    /// <summary>
+    /// NF0104: Hint name truncated due to length limit.
+    /// </summary>
+    public static readonly DiagnosticDescriptor HintNameTruncated = new(
+        id: "NF0104",
+        title: "Hint name truncated - potential collision risk",
+        messageFormat: "Type '{0}' has a fully qualified name that exceeds the {1} character limit. Name was truncated from '{2}' to '{3}'. This may cause collisions with other types. Consider using [assembly: FactoryHintNameLength({4})] to increase the limit, or shorten your namespace/type names.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Generated file hint names must be kept short to avoid file system path limits. When truncation occurs, types in different namespaces with the same class name may collide, causing build failures. Use the FactoryHintNameLengthAttribute to increase the limit if your file system supports longer paths.");
+
+    // Category constant for configuration warnings
+    private const string CategoryConfiguration = "DTZero.Configuration";
+
+    // ============================================================================
+    // Warning Diagnostics (NF0200 range)
+    // ============================================================================
+
+    /// <summary>
+    /// NF0201: Factory method returning target type must be static.
+    /// </summary>
+    public static readonly DiagnosticDescriptor FactoryMethodMustBeStatic = new(
+        id: "NF0201",
+        title: "Factory method returning target type must be static",
+        messageFormat: "Factory method '{0}' returns target type '{1}' but is not static. Method will be skipped.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Factory methods that return the target type must be static. Make the method static or change the return type.");
+
+    /// <summary>
+    /// NF0202: Authorization method has invalid return type.
+    /// </summary>
+    public static readonly DiagnosticDescriptor AuthMethodWrongReturnType = new(
+        id: "NF0202",
+        title: "Authorization method has invalid return type",
+        messageFormat: "Authorization method '{0}' must return bool, string, Task<bool>, or Task<string> - found '{1}'. Method will be skipped.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Authorization methods must return bool, string, string?, Task<bool>, Task<string>, or Task<string?>. Change the return type to indicate authorization status.");
+
+    /// <summary>
+    /// NF0203: Ambiguous save operations.
+    /// </summary>
+    public static readonly DiagnosticDescriptor AmbiguousSaveOperations = new(
+        id: "NF0203",
+        title: "Ambiguous save operations",
+        messageFormat: "Multiple {0} methods found with matching parameters: {1}. Only the first will be used in Save.",
+        category: CategoryConfiguration,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Multiple Insert, Update, or Delete methods with the same parameter signature were found. Rename methods or use different parameter signatures to disambiguate.");
+
+    /// <summary>
+    /// NF0204: Write operation should not return target type.
+    /// </summary>
+    public static readonly DiagnosticDescriptor WriteReturnsTargetType = new(
+        id: "NF0204",
+        title: "Write operation should not return target type",
+        messageFormat: "Method '{0}' has [{1}] attribute but returns target type '{2}'. Only [Fetch] and [Create] can return target type. Method will be skipped.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Insert, Update, Delete, and Execute operations should not return the target type. Only Fetch and Create operations can return the target type.");
+
+    /// <summary>
+    /// NF0205: [Create] on type requires record with primary constructor.
+    /// </summary>
+    public static readonly DiagnosticDescriptor CreateOnTypeRequiresRecordWithPrimaryConstructor = new(
+        id: "NF0205",
+        title: "[Create] on type requires record with primary constructor",
+        messageFormat: "[Create] attribute on type '{0}' requires a record with a primary constructor. Either add a primary constructor to the record, use [Create] on an explicit constructor, or remove [Create] from the type declaration.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "When [Create] is placed on a type declaration rather than a constructor, the type must be a record with a primary constructor (e.g., 'record Address(string Street, string City)'). This allows the generator to use the primary constructor for factory creation.");
+
+    /// <summary>
+    /// NF0206: record struct not supported.
+    /// </summary>
+    public static readonly DiagnosticDescriptor RecordStructNotSupported = new(
+        id: "NF0206",
+        title: "record struct not supported",
+        messageFormat: "Type '{0}' is a record struct, which is not supported by DTZero. Value types cannot be used with DTZero due to serialization and reference tracking limitations. Use 'record class' or 'record' instead.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "DTZero does not support record struct (value types) because: 1) Value types are copied on assignment, breaking identity tracking. 2) Interface boxing loses type fidelity. 3) JSON $ref reference preservation doesn't work with value types. 4) Factory operations expect nullable return types. Use 'record class' or 'record' instead.");
+
+    /// <summary>
+    /// NF0207: Nested type skipped for ordinal serialization.
+    /// </summary>
+    public static readonly DiagnosticDescriptor NestedTypeOrdinalSkipped = new(
+        id: "NF0207",
+        title: "Nested type skipped for ordinal serialization",
+        messageFormat: "Nested type '{0}' will not have ordinal serialization generated. Move the type to the namespace level to enable compact JSON serialization.",
+        category: CategoryConfiguration,
+        defaultSeverity: DiagnosticSeverity.Info,
+        isEnabledByDefault: true,
+        description: "Ordinal serialization generates IOrdinalSerializable and IOrdinalSerializationMetadata implementations for types with the [Factory] attribute. Nested types are skipped because the generated partial class structure requires top-level types. To enable ordinal serialization for this type, move it to the namespace level.");
+
+    // ============================================================================
+    // Info Diagnostics (NF0300 range) - Opt-in for debugging
+    // ============================================================================
+
+    /// <summary>
+    /// NF0301: Method has no factory operation attribute.
+    /// This is an opt-in diagnostic for debugging why methods don't generate.
+    /// Enable via .editorconfig: dotnet_diagnostic.NF0301.severity = suggestion
+    /// </summary>
+    public static readonly DiagnosticDescriptor MethodSkippedNoAttribute = new(
+        id: "NF0301",
+        title: "Method has no factory operation attribute",
+        messageFormat: "Method '{0}' in factory class '{1}' has no factory operation attribute and will not be generated",
+        category: CategoryConfiguration,
+        defaultSeverity: DiagnosticSeverity.Info,
+        isEnabledByDefault: false,  // Opt-in only
+        description: "This diagnostic helps debug why a method is not included in factory generation. Enable it via .editorconfig when troubleshooting.");
+
+    // ============================================================================
+    // FactoryEventHandler Diagnostics (NF0400 range)
+    // ============================================================================
+
+    /// <summary>
+    /// NF0405: FactoryEventHandler method must be static.
+    /// </summary>
+    public static readonly DiagnosticDescriptor FactoryEventHandlerMustBeStatic = new(
+        id: "NF0405",
+        title: "[FactoryEventHandler] method must be static",
+        messageFormat: "[FactoryEventHandler] method '{0}' must be static. Add the 'static' modifier.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "[FactoryEventHandler] methods must be static. The containing class can be static or non-static, but the handler method itself must be static.");
+
+    // Relay Handler Diagnostics (NF0500 range)
+
+    /// <summary>
+    /// NF0501: No matching handler method found for [FactoryEventHandler&lt;T&gt;].
+    /// </summary>
+    public static readonly DiagnosticDescriptor RelayHandlerMethodNotFound = new(
+        id: "NF0501",
+        title: "No matching handler method for [FactoryEventHandler<T>]",
+        messageFormat: "Class '{0}' has [FactoryEventHandler<{1}>] but no matching handler method",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A class decorated with [FactoryEventHandler<T>] must have exactly one non-private method that takes T as its first non-[Service]/non-CancellationToken parameter and returns Task.");
+
+    /// <summary>
+    /// NF0502: Multiple matching handler methods found for [FactoryEventHandler&lt;T&gt;].
+    /// </summary>
+    public static readonly DiagnosticDescriptor RelayHandlerMethodAmbiguous = new(
+        id: "NF0502",
+        title: "Ambiguous handler methods for [FactoryEventHandler<T>]",
+        messageFormat: "Class '{0}' has multiple methods matching [FactoryEventHandler<{1}>]",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A class decorated with [FactoryEventHandler<T>] must have exactly one non-private method that takes T as its first non-[Service]/non-CancellationToken parameter and returns Task.");
+
+    /// <summary>
+    /// NF0503: Instance-method handler on [FactoryEventHandler&lt;T&gt;] is silently unused.
+    /// The former client-side relay pattern used instance methods; that pipeline was removed
+    /// in favor of consumer-implemented IFactoryEventRelay. Instance methods now compile
+    /// without error but produce no generated code.
+    /// </summary>
+    public static readonly DiagnosticDescriptor RelayHandlerInstanceMethodIgnored = new(
+        id: "NF0503",
+        title: "Instance [FactoryEventHandler<T>] handler is ignored",
+        messageFormat: "Class '{0}' has an instance-method handler '{1}' for [FactoryEventHandler<{2}>] but only static handlers are dispatched. The instance method will be silently ignored at runtime. Make the method static, or implement IFactoryEventRelay on the class to receive client-side events.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Client-side instance-method [FactoryEventHandler<T>] handlers were the former relay pattern and are no longer wired up. Convert the method to static for server-side dispatch, or implement IFactoryEventRelay on the class for client-side event reception.");
+
+    /// <summary>
+    /// NF0504: The same event type is declared more than once on one handler class.
+    /// </summary>
+    /// <remarks>
+    /// Warning, not Error, and deliberately so — the severity split in this generator tracks
+    /// what gets emitted rather than how wrong the source is. NF0501/NF0502 add no entry and
+    /// the class emits no file at all, so those declarations are dead. A duplicate event type
+    /// still produces a working registration; only the second declaration is inert. That is
+    /// NF0503's shape, whose Warning severity was chosen to keep the build green.
+    /// <para>
+    /// The duplicate can never carry its own handler: the transform matches handler methods by
+    /// shape (first non-[Service], non-CancellationToken parameter of the event type), not per
+    /// attribute, so both declarations resolve to the same method — and two methods matching
+    /// one event is NF0502. Stacking is for several event <i>types</i>, which is what the
+    /// published attribute reference documents.
+    /// </para>
+    /// </remarks>
+    public static readonly DiagnosticDescriptor RelayHandlerDuplicateEventType = new(
+        id: "NF0504",
+        title: "Duplicate [FactoryEventHandler<T>] for the same event type",
+        messageFormat: "Class '{0}' declares [FactoryEventHandler<{1}>] more than once. The duplicate is ignored; the first declaration's registration ({2}) stands. Stack [FactoryEventHandler<T>] for different event types, not to re-declare one event.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "A handler class can stack [FactoryEventHandler<T>] attributes for several different event types, but declaring the same event type more than once registers the same handler method twice. Only the first declaration takes effect; the rest are ignored, including any phase or Coalesce flag they specify.");
+
+    /// <summary>
+    /// NF0505: Coalesce declared on an Immediate-phase registration.
+    /// </summary>
+    /// <remarks>
+    /// Warning per the NF0503/NF0504 precedent: the declaration compiles and produces a
+    /// working registration — the flag is simply inert, because Immediate dispatches are
+    /// never queued and only queued dispatches coalesce. The registration is still emitted
+    /// faithfully (flag and all); the diagnostic is the loudness. Scoped to the declared
+    /// Immediate phase: the runtime paths where a DEFERRED phase also dispatches
+    /// immediately (no scheduler in scope — 9004; no entry call active — 9005) are
+    /// unreachable at compile time and are documented in the attribute's XML instead.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor RelayHandlerCoalesceOnImmediate = new(
+        id: "NF0505",
+        title: "Coalesce has no effect at DispatchPhase.Immediate",
+        messageFormat: "Class '{0}' declares [FactoryEventHandler<{1}>] with Coalesce = true at DispatchPhase.Immediate. Immediate dispatches run at Raise and are never queued, so there is nothing to coalesce — the flag has no effect. Remove the flag, or defer the handler to AfterFlush or AfterCommit.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Coalescing collapses identical queued dispatches, and only AfterFlush/AfterCommit handlers are queued. A Coalesce flag on an Immediate registration compiles and registers but never changes behavior.");
+}

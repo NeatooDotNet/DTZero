@@ -1,0 +1,423 @@
+// =============================================================================
+// DESIGN SOURCE OF TRUTH: [AuthorizeFactory<T>] Custom Domain Authorization
+// =============================================================================
+//
+// Tests demonstrating custom domain authorization with [AuthorizeFactory<T>].
+// Covers Can* methods, auth failure behaviors (null returns, NotAuthorizedException),
+// TrySave, and client-server round-trip with authorization.
+//
+// DESIGN DECISION: Test all authorization behaviors in isolation
+//
+// AuthorizedOrderAuth reads ICurrentUser. Each Scopes() call shares one fresh
+// TestUser, signed in with every order role, across its three containers; a
+// test denies an operation by taking a role away, as a real user lacks one.
+// The user lives in the test's own containers, so no test sees another's.
+//
+// DESIGN DECISION: Use local mode for most auth tests
+//
+// Authorization logic is the same in local and remote modes -- the generated
+// code checks auth before executing the operation regardless of mode.
+// Scenarios 11 and 12 use the client container: 11 shows the local Create
+// running its rules on the client, 12 a denied Fetch crossing to the server.
+//
+// =============================================================================
+
+using Design.Domain.Aggregates;
+using Design.Tests.TestInfrastructure;
+using DTZero;
+
+namespace Design.Tests.FactoryTests;
+
+/// <summary>
+/// Tests for [AuthorizeFactory] custom domain authorization on AuthorizedOrder.
+/// </summary>
+public class AuthorizationTests
+{
+    // -------------------------------------------------------------------------
+    // Can* Method Tests
+    //
+    // GENERATOR BEHAVIOR: Can* methods check the auth interface
+    //
+    // Each Can* method resolves IAuthorizedOrderAuth from DI and calls
+    // the auth methods whose operation scope matches. For example:
+    // - CanCreate checks HasAccess() (Read|Write scope) and CanCreate() (Create scope)
+    // - CanFetch checks HasAccess() (Read|Write scope) and CanFetch() (Fetch scope)
+    // - CanSave aggregates auth from Insert, Update, Delete:
+    //   distinct set = {HasAccess(), CanCreate(), CanDelete()} (CanCreate is Create | Insert)
+    // - CanDelete checks HasAccess() (Read|Write scope) and CanDelete() (Delete scope)
+    //
+    // DESIGN DECISION: Can* returns Authorized (synchronous, not Task<Authorized>)
+    //
+    // Whatever the operation's own placement (Fetch and the writes are [Remote]
+    // internal; Create is local), the generated Can*
+    // methods return Authorized directly (not Task<Authorized>). The generator
+    // makes Can* methods synchronous regardless of the source method's async status.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Scenario 1: CanCreate returns HasAccess=true when all auth checks pass.
+    /// Rule 3: WHEN auth allows Create, THEN factory.CanCreate().HasAccess == true.
+    /// </summary>
+    [Fact]
+    public void AuthorizedOrder_CanCreate_ReturnsTrue_WhenAllowed()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IAuthorizedOrderFactory>();
+
+        // Act
+        var result = factory.CanCreate();
+
+        // Assert
+        Assert.True(result.HasAccess);
+
+        local.Dispose();
+    }
+
+    /// <summary>
+    /// Scenario 2: CanFetch returns HasAccess=false when auth denies Fetch.
+    /// Rule 4: WHEN auth denies Fetch, THEN factory.CanFetch().HasAccess == false.
+    /// </summary>
+    [Fact]
+    public void AuthorizedOrder_CanFetch_ReturnsFalse_WhenDenied()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IAuthorizedOrderFactory>();
+        local.GetRequiredService<TestUser>().Roles.ExceptWith([OrderRoles.Sales, OrderRoles.Support]);
+
+        // Act
+        var result = factory.CanFetch();
+
+        // Assert
+        Assert.False(result.HasAccess);
+
+        local.Dispose();
+    }
+
+    /// <summary>
+    /// Scenario 3: CanSave returns HasAccess=false when any write check fails.
+    /// Rule 5: WHEN CanDelete returns false, THEN factory.CanSave().HasAccess == false,
+    /// because CanSave aggregates all write auth checks and the Delete check fails.
+    /// </summary>
+    [Fact]
+    public void AuthorizedOrder_CanSave_ReturnsFalse_WhenDeleteDenied()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IAuthorizedOrderFactory>();
+        local.GetRequiredService<TestUser>().Roles.Remove(OrderRoles.Manager);
+
+        // Act
+        var result = factory.CanSave();
+
+        // Assert -- CanSave aggregates {HasAccess(), CanCreate(), CanDelete()}; CanDelete fails
+        Assert.False(result.HasAccess);
+
+        local.Dispose();
+    }
+
+    /// <summary>
+    /// Scenario 4: CanSave returns HasAccess=true when all write checks pass.
+    /// Rule 6: WHEN all write auth checks pass, THEN factory.CanSave().HasAccess == true.
+    /// </summary>
+    [Fact]
+    public void AuthorizedOrder_CanSave_ReturnsTrue_WhenAllWriteAllowed()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IAuthorizedOrderFactory>();
+
+        // Act
+        var result = factory.CanSave();
+
+        // Assert
+        Assert.True(result.HasAccess);
+
+        local.Dispose();
+    }
+
+    // -------------------------------------------------------------------------
+    // Auth Failure Behavior -- Create and Fetch
+    //
+    // GENERATOR BEHAVIOR: Read operations return null on auth failure
+    //
+    // When authorization denies a Create or Fetch operation, the generated
+    // factory method returns null instead of throwing an exception.
+    // This allows callers to check CanCreate/CanFetch before calling,
+    // or handle the null result gracefully.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Scenario 5: Create returns null when auth denies.
+    /// Rule 7: WHEN authorization denies Create, THEN factory.Create() returns null.
+    /// </summary>
+    #region authorization-testing
+    [Fact]
+    public void AuthorizedOrder_Create_ReturnsNull_WhenDenied()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IAuthorizedOrderFactory>();
+        local.GetRequiredService<TestUser>().Roles.Remove(OrderRoles.Sales);
+
+        // Act
+        var result = factory.Create("Should Not Create");
+
+        // Assert
+        Assert.Null(result);
+
+        local.Dispose();
+    }
+    #endregion
+
+    /// <summary>
+    /// Scenario 6: Fetch returns null when auth denies.
+    /// Rule 8: WHEN authorization denies Fetch, THEN factory.Fetch() returns null.
+    /// </summary>
+    [Fact]
+    public async Task AuthorizedOrder_Fetch_ReturnsNull_WhenDenied()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IAuthorizedOrderFactory>();
+        local.GetRequiredService<TestUser>().Roles.ExceptWith([OrderRoles.Sales, OrderRoles.Support]);
+
+        // Act
+        var result = await factory.Fetch(123);
+
+        // Assert
+        Assert.Null(result);
+
+        local.Dispose();
+    }
+
+    /// <summary>
+    /// Scenario 7: Create returns non-null when auth allows.
+    /// Rule 9: WHEN authorization allows Create, THEN factory.Create() returns non-null IAuthorizedOrder.
+    /// </summary>
+    [Fact]
+    public async Task AuthorizedOrder_Create_ReturnsInstance_WhenAllowed()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IAuthorizedOrderFactory>();
+
+        // Act
+        var result = factory.Create("Test Customer");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("Test Customer", result.CustomerName);
+        Assert.True(result.IsNew);
+
+        local.Dispose();
+    }
+
+    // -------------------------------------------------------------------------
+    // Auth Failure Behavior -- Save
+    //
+    // GENERATOR BEHAVIOR: Write operations throw NotAuthorizedException
+    //
+    // When authorization denies a Save operation, the generated Save() method
+    // throws NotAuthorizedException. TrySave() catches this exception and
+    // returns Authorized<T> with HasAccess=false.
+    //
+    // This distinction (null for Read, exception for Write) makes sense because:
+    // - Read failures are expected (user might not have access to some data)
+    // - Write failures are exceptional (user already has the data, shouldn't lose it)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Scenario 8: Save throws NotAuthorizedException when delete is denied.
+    /// Rule 10: WHEN authorization denies delete and target.IsDeleted=true,
+    /// THEN factory.Save() throws NotAuthorizedException.
+    /// </summary>
+    [Fact]
+    public async Task AuthorizedOrder_Save_ThrowsNotAuthorizedException_WhenDeleteDenied()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IAuthorizedOrderFactory>();
+
+        // Create an entity, then mark it for deletion
+        var order = factory.Create("Delete Test");
+        Assert.NotNull(order);
+        // Simulate fetched entity (not new) that is being deleted
+        order.IsNew = false;
+        order.IsDeleted = true;
+
+        // Now deny delete authorization
+        local.GetRequiredService<TestUser>().Roles.Remove(OrderRoles.Manager);
+
+        // Act & Assert
+        var ex = await Assert.ThrowsAsync<NotAuthorizedException>(() => factory.Save(order));
+
+        // DESIGN DECISION: a denial always carries a message
+        //
+        // AuthorizedOrderAuth.CanDelete returns bool, so it supplies no reason of its own.
+        // The framework then names the operation and type rather than leaving the message
+        // empty -- an empty exception message is dropped by some telemetry pipelines, which
+        // turns a correct refusal into an invisible one. An auth method that DOES return a
+        // string keeps its message verbatim; see InterfaceFactoryAuthorizationTests.
+        Assert.False(string.IsNullOrWhiteSpace(ex.Message));
+        Assert.Contains("Save", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("IAuthorizedOrder", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("operation Save on IAuthorizedOrder", ex.Context);
+
+        local.Dispose();
+    }
+
+    /// <summary>
+    /// Scenario 9: TrySave returns HasAccess=false when delete is denied.
+    /// Rule 11: WHEN authorization denies delete and target.IsDeleted=true,
+    /// THEN factory.TrySave() returns Authorized with HasAccess=false and Result=null.
+    /// </summary>
+    [Fact]
+    public async Task AuthorizedOrder_TrySave_ReturnsFalse_WhenDeleteDenied()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IAuthorizedOrderFactory>();
+
+        // Create an entity, then mark it for deletion
+        var order = factory.Create("TrySave Delete Test");
+        Assert.NotNull(order);
+        order.IsNew = false;
+        order.IsDeleted = true;
+
+        // Now deny delete authorization
+        local.GetRequiredService<TestUser>().Roles.Remove(OrderRoles.Manager);
+
+        // Act
+        var result = await factory.TrySave(order);
+
+        // Assert
+        Assert.False(result.HasAccess);
+        Assert.Null(result.Result);
+
+        local.Dispose();
+    }
+
+    /// <summary>
+    /// Scenario 10: TrySave returns HasAccess=true when insert is allowed.
+    /// Rule 12: WHEN all write checks pass and target.IsNew=true,
+    /// THEN factory.TrySave() returns Authorized with HasAccess=true, Result != null,
+    /// and Result.IsNew == false (reset by FactoryCompleteAsync after Insert).
+    /// </summary>
+    [Fact]
+    public async Task AuthorizedOrder_TrySave_ReturnsTrue_WhenInsertAllowed()
+    {
+        // Arrange
+        var (_, _, local) = DesignClientServerContainers.Scopes();
+        var factory = local.GetRequiredService<IAuthorizedOrderFactory>();
+
+        var order = factory.Create("TrySave Insert Test");
+        Assert.NotNull(order);
+        Assert.True(order.IsNew);
+
+        // Act
+        var result = await factory.TrySave(order);
+
+        // Assert
+        Assert.True(result.HasAccess);
+        Assert.NotNull(result.Result);
+        Assert.False(result.Result!.IsNew); // Reset by FactoryCompleteAsync after Insert
+
+        local.Dispose();
+    }
+
+    // -------------------------------------------------------------------------
+    // Client-Server Round-Trip Tests
+    //
+    // DESIGN DECISION: Verify auth works across serialization boundary
+    //
+    // These tests use the client container to verify that authorization
+    // works correctly when requests cross the client-server boundary via
+    // JSON serialization. The auth class and ICurrentUser are registered in
+    // both containers: Can* and the local Create run the rules on the client,
+    // and Fetch and Save run them again on the server.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Scenario 11: Auth-allowed Create works from the client container.
+    /// Rules 3, 9, 13: Create is local (D14), so it runs its rules on the client and
+    /// returns a non-null IAuthorizedOrder with no server call; its Save then crosses
+    /// to the server, which runs the Insert rules (CanCreate included) again.
+    /// </summary>
+    [Fact]
+    public async Task AuthorizedOrder_Create_RunsOnTheClient()
+    {
+        // Arrange
+        var (server, client, _) = DesignClientServerContainers.Scopes();
+        var factory = client.GetRequiredService<IAuthorizedOrderFactory>();
+
+        // Act -- the Create runs on the client
+        var result = factory.Create("Client-Server Test");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("Client-Server Test", result.CustomerName);
+        Assert.True(result.IsNew);
+        Assert.Equal(0, client.GetRequiredService<ServerServiceProvider>().RemoteCallCount);
+
+        // The Save crosses, and the server's Insert rules pass for this user
+        var saved = await factory.Save(result);
+        Assert.NotNull(saved);
+        Assert.False(saved.IsNew);
+        Assert.Equal(1, client.GetRequiredService<ServerServiceProvider>().RemoteCallCount);
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    /// <summary>
+    /// Scenario 12: Auth-denied Fetch returns null through client-server.
+    /// Rules 4, 8, 13: null returned after serialization round-trip.
+    /// </summary>
+    [Fact]
+    public async Task AuthorizedOrder_Fetch_ReturnsNull_ThroughClientServer()
+    {
+        // Arrange
+        var (server, client, _) = DesignClientServerContainers.Scopes();
+        var factory = client.GetRequiredService<IAuthorizedOrderFactory>();
+        client.GetRequiredService<TestUser>().Roles.ExceptWith([OrderRoles.Sales, OrderRoles.Support]);
+
+        // Act -- request crosses to server via serialization
+        var result = await factory.Fetch(456);
+
+        // Assert
+        Assert.Null(result);
+
+        server.Dispose();
+        client.Dispose();
+    }
+
+    /// <summary>
+    /// A screen asks CanCreate before it offers "New". Both run the same rules, on
+    /// the client, with no server call.
+    /// </summary>
+    [Fact]
+    public void AuthorizedOrder_CanCreate_GuardsTheCreate_OnTheClient()
+    {
+        var (server, client, local) = DesignClientServerContainers.Scopes();
+        var factory = client.GetRequiredService<IAuthorizedOrderFactory>();
+        IAuthorizedOrder? order = null;
+
+        #region authorization-generated
+        if (factory.CanCreate().HasAccess)   // the rules Create runs, asked first: show "New" only if they pass
+        {
+            order = factory.Create("New Customer");
+        }
+        #endregion
+
+        Assert.NotNull(order);
+        client.GetRequiredService<TestUser>().Roles.Remove(OrderRoles.Sales);
+        Assert.False(factory.CanCreate().HasAccess);
+        Assert.Equal(0, client.GetRequiredService<ServerServiceProvider>().RemoteCallCount);
+
+        server.Dispose();
+        client.Dispose();
+        local.Dispose();
+    }
+}

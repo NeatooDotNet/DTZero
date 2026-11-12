@@ -1,0 +1,371 @@
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using DTZero;
+using System.Collections.Immutable;
+using System.Reflection;
+
+namespace DTZeroTests.UnitTests.TestContainers;
+
+/// <summary>
+/// Helper class for running the Roslyn source generator in tests and capturing diagnostics.
+/// </summary>
+/// <remarks>
+/// This helper uses the Roslyn CSharpGeneratorDriver to run the generator against
+/// test source code and capture any diagnostics emitted. This is used for testing
+/// that the generator correctly reports errors, warnings, and info diagnostics.
+/// </remarks>
+public static class DiagnosticTestHelper
+{
+    private static readonly Lazy<IIncrementalGenerator> GeneratorInstance = new(() =>
+    {
+        // Load the generator assembly dynamically
+        var testAssemblyPath = typeof(DiagnosticTestHelper).Assembly.Location;
+        var testDir = Path.GetDirectoryName(testAssemblyPath)!;
+
+        // Search for generator in src folder structure
+        var generatorPath = FindGeneratorAssembly(testDir)
+            ?? throw new FileNotFoundException("Could not find DTZero.Generator.dll");
+
+        var generatorAssembly = Assembly.LoadFrom(generatorPath);
+        var generatorType = generatorAssembly.GetType("DTZero.Generator.Factory")
+            ?? throw new InvalidOperationException("FactoryGenerator type not found");
+
+        return (IIncrementalGenerator)Activator.CreateInstance(generatorType)!;
+    });
+
+    private static string? FindGeneratorAssembly(string startDir)
+    {
+        var dir = new DirectoryInfo(startDir);
+        var configurations = new[] { "Debug", "Release" };
+
+        while (dir != null)
+        {
+            foreach (var config in configurations)
+            {
+                // Check src folder structure
+                var srcDir = Path.Combine(dir.FullName, "src", "Generator", "bin", config, "netstandard2.0");
+                var candidatePath = Path.Combine(srcDir, "DTZero.Generator.dll");
+                if (File.Exists(candidatePath))
+                {
+                    return candidatePath;
+                }
+
+                // Also check direct child
+                candidatePath = Path.Combine(dir.FullName, "Generator", "bin", config, "netstandard2.0", "DTZero.Generator.dll");
+                if (File.Exists(candidatePath))
+                {
+                    return candidatePath;
+                }
+            }
+
+            dir = dir.Parent;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Runs the source generator on the provided source code and returns the diagnostics.
+    /// </summary>
+    /// <param name="source">C# source code to analyze.</param>
+    /// <returns>Tuple containing all diagnostics, the output compilation, and the generator run result.</returns>
+    public static (ImmutableArray<Diagnostic> Diagnostics, Compilation OutputCompilation, GeneratorDriverRunResult RunResult) RunGenerator(string source)
+        => RunGenerator(source, GeneratorInstance.Value);
+
+    /// <summary>
+    /// Runs the given generator. The seam exists so <c>DiagnosticTestHelperTests</c> can feed
+    /// a generator that throws, which the real one cannot be made to do on demand.
+    /// </summary>
+    internal static (ImmutableArray<Diagnostic> Diagnostics, Compilation OutputCompilation, GeneratorDriverRunResult RunResult) RunGenerator(
+        string source,
+        IIncrementalGenerator generator)
+    {
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
+        var syntaxTree = CSharpSyntaxTree.ParseText(source, parseOptions);
+
+        var references = BuildReferences();
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName: "TestAssembly",
+            syntaxTrees: [syntaxTree],
+            references: references,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var diagnostics);
+        var runResult = driver.GetRunResult();
+        AssertGeneratorDidNotThrow(runResult);
+
+        // The driver's out-param already holds every generator diagnostic from this run, and
+        // GetRunResult().Diagnostics holds the same ones — so the AddRange this used to do
+        // returned every diagnostic TWICE. Nothing consumed the count, so nothing was red, but
+        // it silently falsified any count assertion written against this array. Found while
+        // writing NF0504's tests, which asserted Single() and got two.
+        //
+        // Returning one source rather than Distinct()-ing the union, for a narrower reason than
+        // it first appears. Distinct() also works — measured, not assumed: the two collections
+        // hold the SAME Diagnostic instances, so identity dedupe removes the doubling, while
+        // two genuinely repeated diagnostics (a class stacking attributes that each fail the
+        // same way reports NF0502 once per attribute, same location, byte-identical message)
+        // are separate instances and survive. But that correctness rests entirely on the two
+        // collections sharing object identity, which is a Roslyn implementation detail no test
+        // here controls. Not concatenating needs no such assumption.
+        //
+        // Whichever way this is written, multiplicity must be preserved — a genuine repeat is
+        // signal, and DiagnosticTestHelperTests pins it.
+        //
+        // This is the compilation-filtered set — what a consumer's build actually surfaces,
+        // with severity settings and suppressions applied. Callers needing the raw, unfiltered
+        // generator output can still reach RunResult.Diagnostics on the third tuple element.
+        return (diagnostics, outputCompilation, runResult);
+    }
+
+    private static List<MetadataReference> BuildReferences()
+    {
+        // Get the DTZero assembly for references
+        var dtZeroAssembly = typeof(FactoryAttribute).Assembly;
+
+        var references = new List<MetadataReference>
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Task).Assembly.Location),
+            MetadataReference.CreateFromFile(dtZeroAssembly.Location),
+
+            // Generated factory code declares FactoryServiceRegistrar(IServiceCollection, ...)
+            // and calls AddScoped / TryAddTransient / GetRequiredService; class factories also
+            // reach for ILogger<T>. Without these, EVERY generated tree fails to compile in this
+            // harness for reasons that have nothing to do with the code under test.
+            //
+            // Added by TRIM-008. Their absence was not costing correctness — nothing asserted on
+            // OutputCompilation — but it silently capped what this helper could ever detect: a
+            // generator change that emits uncompilable source was undetectable here, and the
+            // relay-handler renderer in particular has no other error signal (it bypasses
+            // NormalizeWhitespace, and FactoryRenderer swallows parse failures into a
+            // /* Error: */ comment rather than throwing).
+            MetadataReference.CreateFromFile(typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.Extensions.DependencyInjection.ServiceCollection).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.Extensions.Logging.ILogger<>).Assembly.Location)
+        };
+
+        // Add System.Runtime, plus System.ComponentModel — which is where IServiceProvider
+        // is surfaced for reference purposes. Generated registrars and factories take an
+        // IServiceProvider, so without it the output compilation reports CS0012 on every
+        // generated tree.
+        //
+        // The three System.Collections assemblies hold the sorted, concurrent, and immutable
+        // dictionaries the DTO walk claims to reach. Without them those types bind as error
+        // types in a fixture and are never walked, so a test of them could only be red.
+        var runtimeAssemblyPath = Path.GetDirectoryName(typeof(object).Assembly.Location);
+        foreach (var name in new[]
+        {
+            "System.Runtime.dll",
+            "System.ComponentModel.dll",
+            "System.Collections.dll",
+            "System.Collections.Concurrent.dll",
+            "System.Collections.Immutable.dll"
+        })
+        {
+            var path = Path.Combine(runtimeAssemblyPath!, name);
+            if (File.Exists(path))
+            {
+                references.Add(MetadataReference.CreateFromFile(path));
+            }
+        }
+
+        return references;
+    }
+
+    /// <summary>
+    /// Runs the generator twice with incremental step tracking enabled, applying an
+    /// unrelated edit between the runs, and returns the second run's result.
+    /// </summary>
+    /// <param name="source">The fixture source, present in both runs.</param>
+    /// <param name="appendedSource">An unrelated declaration appended for the second run.</param>
+    /// <remarks>
+    /// Two details make this a non-vacuous caching probe:
+    ///
+    /// 1. The edit REPLACES the existing syntax tree rather than adding a second one.
+    ///    Adding a separate tree would leave the fixture's nodes untouched, so Roslyn
+    ///    would serve every transform from its own upstream cache and the assertion
+    ///    would pass no matter how broken the transform-output equality is. Replacing
+    ///    the tree forces every transform in it to re-run, which is what makes the
+    ///    equality of the transform-output records the thing under test.
+    ///
+    /// 2. The edit is APPENDED, so the spans and line positions of the existing
+    ///    declarations do not move. TypeInfo and DiagnosticInfo capture file paths and
+    ///    line/column positions, so an edit that shifted them would change transform
+    ///    output for an entirely benign reason and the guard would fail without a defect.
+    ///
+    /// Local iteration gotcha: the generator is loaded once per process via
+    /// Assembly.LoadFrom and held in a static Lazy. If you rebuild ONLY the generator
+    /// and re-run with --no-build, a surviving testhost can serve the previously loaded
+    /// generator assembly, and the guard will report on stale code — it will appear to
+    /// pass against a generator you just broke. Rebuild the test project too (or run
+    /// without --no-build) when verifying a red/green cycle on this guard. CI is
+    /// unaffected: every run starts from a cold build.
+    /// </remarks>
+    public static (GeneratorDriverRunResult First, GeneratorDriverRunResult Second) RunGeneratorTracked(
+        string source,
+        string appendedSource)
+    {
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
+        var firstTree = CSharpSyntaxTree.ParseText(source, parseOptions, path: "Fixture.cs");
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName: "TestAssembly",
+            syntaxTrees: [firstTree],
+            references: BuildReferences(),
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        AssertInputCompiles(compilation, "the fixture");
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [GeneratorInstance.Value.AsSourceGenerator()],
+            additionalTexts: null,
+            parseOptions: parseOptions,
+            optionsProvider: null,
+            driverOptions: new GeneratorDriverOptions(
+                IncrementalGeneratorOutputKind.None,
+                trackIncrementalGeneratorSteps: true));
+
+        driver = driver.RunGenerators(compilation);
+        var first = driver.GetRunResult();
+        AssertGeneratorDidNotThrow(first);
+
+        var secondTree = CSharpSyntaxTree.ParseText(source + appendedSource, parseOptions, path: "Fixture.cs");
+        var secondCompilation = compilation.ReplaceSyntaxTree(firstTree, secondTree);
+
+        AssertInputCompiles(secondCompilation, "the fixture plus the appended edit");
+
+        driver = driver.RunGenerators(secondCompilation);
+        var second = driver.GetRunResult();
+        AssertGeneratorDidNotThrow(second);
+
+        return (first, second);
+    }
+
+    /// <summary>
+    /// Fails loudly if a generator fixture does not compile before the generator runs.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RunGeneratorTracked"/> inspected nothing about its input, so a fixture that
+    /// stopped compiling degraded silently instead of failing: the transform's own fallbacks
+    /// absorb what a broken fixture produces — a dropped <c>using</c> makes the phase argument
+    /// unbindable and <c>ReadDispatchPhase</c> returns <c>Immediate</c> — and the caching
+    /// assertions compare transform outputs across two runs, which a degraded fixture satisfies
+    /// just as well as a healthy one. <c>IncrementalCacheTests</c> carried three separate
+    /// "fixture health" guards written to cover for exactly this, and its own remarks named the
+    /// gap. The guard belongs here, once, ahead of them.
+    /// <para>
+    /// Errors only. Generator fixtures are terse by design and trip warnings (unused usings,
+    /// missing XML docs) that say nothing about whether the fixture exercises what it claims.
+    /// </para>
+    /// <para>
+    /// <b>Deliberately not called from <see cref="RunGenerator"/>.</b> That overload is the
+    /// entry point behind every diagnostic test, and those feed source that is *supposed* to
+    /// carry errors — NF0101's non-partial class, NF0105's <c>[Remote] public</c>, the
+    /// undefined-phase casts. Guarding there would fail the tests whose whole subject is bad
+    /// input. <c>RunGeneratorTracked</c> is different: its callers are caching guards whose
+    /// fixtures must be healthy for the comparison to mean anything, which is why the gap
+    /// mattered there and not here. (PHASE-008 gate, should-cover — recorded rather than
+    /// closed.)
+    /// </para>
+    /// </remarks>
+    /// <param name="compilation">The input compilation, before the generator runs.</param>
+    /// <param name="what">Names which input failed, since the tracked run checks two.</param>
+    private static void AssertInputCompiles(Compilation compilation, string what)
+    {
+        var errors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Generator test input did not compile ({what}). The generator was never run, so any "
+                + "assertion downstream of this would have reported on a degraded fixture rather than on "
+                + $"the generator. Fix the fixture.{Environment.NewLine}"
+                + string.Join(Environment.NewLine, errors.Select(e => e.ToString())));
+        }
+    }
+
+    /// <summary>
+    /// Fails if the generator threw during the run.
+    /// </summary>
+    /// <remarks>
+    /// Roslyn catches a generator exception, reports it as a CS8785 warning, and produces no
+    /// generated trees, so without this check a thrown generator reads as a quiet one. Every
+    /// "not emitted" assertion then passes against nothing, and a diagnostic test sees one
+    /// warning where it expected its NF diagnostic. Unlike <see cref="AssertInputCompiles"/>
+    /// this is safe on every entry point: no test feeds input that is supposed to crash the
+    /// generator, so a generator exception is always a defect in the generator.
+    /// </remarks>
+    private static void AssertGeneratorDidNotThrow(GeneratorDriverRunResult runResult)
+    {
+        var thrown = runResult.Results
+            .Where(r => r.Exception is not null)
+            .Select(r => r.Exception!)
+            .ToList();
+
+        if (thrown.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "The generator threw. Roslyn would have reported this as CS8785 with no generated trees, so "
+                + "any assertion about absent output would have passed against nothing."
+                + Environment.NewLine
+                + string.Join(Environment.NewLine, thrown.Select(e => e.ToString())));
+        }
+    }
+
+    /// <summary>
+    /// Runs the generator and returns only diagnostics with the specified ID.
+    /// </summary>
+    public static IEnumerable<Diagnostic> GetDiagnosticsById(string source, string diagnosticId)
+    {
+        var (diagnostics, _, _) = RunGenerator(source);
+        return diagnostics.Where(d => d.Id == diagnosticId);
+    }
+
+    /// <summary>
+    /// Runs the generator and returns all NF-prefixed diagnostics (DTZero diagnostics).
+    /// </summary>
+    public static IEnumerable<Diagnostic> GetDTZeroDiagnostics(string source)
+    {
+        var (diagnostics, _, _) = RunGenerator(source);
+        return diagnostics.Where(d => d.Id.StartsWith("NF"));
+    }
+
+    /// <summary>
+    /// Asserts that the generator produces no DTZero diagnostics.
+    /// </summary>
+    public static void AssertNoDTZeroDiagnostics(string source)
+    {
+        var nfDiagnostics = GetDTZeroDiagnostics(source).ToList();
+        if (nfDiagnostics.Count > 0)
+        {
+            var messages = string.Join(Environment.NewLine, nfDiagnostics.Select(d => $"{d.Id}: {d.GetMessage()}"));
+            throw new Xunit.Sdk.XunitException($"Expected no DTZero diagnostics, but found:{Environment.NewLine}{messages}");
+        }
+    }
+
+    /// <summary>
+    /// Asserts that the generator produces a diagnostic with the specified ID.
+    /// </summary>
+    public static Diagnostic AssertHasDiagnostic(string source, string diagnosticId, DiagnosticSeverity? expectedSeverity = null)
+    {
+        var diagnostics = GetDiagnosticsById(source, diagnosticId).ToList();
+        if (diagnostics.Count == 0)
+        {
+            throw new Xunit.Sdk.XunitException($"Expected diagnostic {diagnosticId} but none was found.");
+        }
+
+        var diagnostic = diagnostics.First();
+        if (expectedSeverity.HasValue && diagnostic.Severity != expectedSeverity.Value)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"Diagnostic {diagnosticId} has severity {diagnostic.Severity}, expected {expectedSeverity.Value}.");
+        }
+
+        return diagnostic;
+    }
+}

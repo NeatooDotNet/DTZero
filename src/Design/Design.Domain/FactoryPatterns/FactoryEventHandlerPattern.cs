@@ -1,0 +1,193 @@
+using DTZero;
+
+namespace Design.Domain.FactoryPatterns;
+
+// =============================================================================
+// FACTORY EVENT HANDLER PATTERN (Transactional Mediator Events)
+// =============================================================================
+//
+// [FactoryEventHandler<T>] + IFactoryEvents.Raise<T>() is DTZero's path for
+// domain events that must participate in the caller's transaction.
+//
+// EXECUTION MODEL (the three invariants of the DEFAULT — Immediate — phase):
+//
+// Everything below describes a handler whose [FactoryEventHandler<T>] attribute
+// has no DispatchPhase argument, which registers at DispatchPhase.Immediate.
+// Handlers can instead defer to the AfterFlush or AfterCommit drain points —
+// see FactoryEventPhasesPattern.cs for the phase contract. Note the flip side
+// of invariant 1: an Immediate handler observes the caller's STAGED (unflushed)
+// state — a projection that queries the database here reads the world without
+// the aggregate's pending writes. That is what the later phases are for.
+//
+//   1. SHARED SCOPE. Handlers resolve their [Service] dependencies from the
+//      caller's IServiceProvider. A DbContext injected into the factory method
+//      and a DbContext injected into the handler are the same instance, so
+//      both participate in the same transaction.
+//
+//   2. SEQUENTIAL. Handlers run one after another in unspecified order. A
+//      DbContext is not thread-safe, so handlers cannot run in parallel.
+//      Callers must not depend on a specific ordering.
+//
+//   3. AWAITED. Raise<T>() does not return until every handler has completed.
+//      A handler exception aborts the remaining handlers and propagates to the
+//      caller, so the caller can let the transaction roll back. Across the
+//      client/server boundary the HTTP call stays open until all server-side
+//      handlers have finished, and a server exception surfaces on the client.
+//
+// When to use [FactoryEventHandler<T>] with IFactoryEvents.Raise<T>:
+//   - Domain events that must participate in the aggregate's transaction
+//   - Events where a handler failure should abort the aggregate operation
+//   - Events where you need the caller to observe the post-handler state
+//
+// Static handler methods → server-side dispatch (runs in caller's scope).
+// Instance handler methods → client-side relay dispatch (see FactoryEventRelayPattern.cs).
+//
+// No [Factory] attribute needed — [FactoryEventHandler<T>] is a standalone pipeline.
+//
+// =============================================================================
+
+/// <summary>
+/// Event object raised when an order is placed. Inherits from FactoryEventBase.
+/// </summary>
+#region attributes-factoryevent
+public record OrderPlacedEvent(int OrderId, string CustomerEmail) : FactoryEventBase;
+#endregion
+
+/// <summary>
+/// Demonstrates: [FactoryEventHandler&lt;T&gt;] with a static server-side handler.
+///
+/// Key points:
+/// - Handler method is static → registers into FactoryEventHandlerRegistry.
+/// - First non-[Service]/non-CT parameter is the event type (routing key).
+/// - [Service] parameters resolve from the CALLER'S scope. A DbContext injected
+///   here is the same DbContext the factory method is using — the handler's
+///   work participates in the caller's transaction automatically.
+/// - CancellationToken is the token the caller passed to
+///   <see cref="IFactoryEvents.Raise{T}"/>.
+/// </summary>
+/// <remarks>
+/// DESIGN DECISION: Share the caller's DI scope with handlers.
+///
+/// Reasons:
+/// 1. Domain events often need to read or write through the same DbContext
+///    (and therefore the same transaction) as the aggregate that raised them.
+///    A new scope would give the handler a new DbContext and a separate
+///    transaction, which defeats the point.
+/// 2. Scoped services other than DbContext (tenant context, correlation
+///    context, unit-of-work markers) are also shared automatically — no
+///    explicit propagation needed.
+/// 3. A handler that throws can roll the caller's transaction back, which
+///    makes handler code a natural place to enforce cross-aggregate invariants.
+///
+/// DID NOT DO THIS: Detached scope + fire-and-forget dispatch (the "older"
+/// mediator default).
+///
+/// Reasons:
+/// 1. Detached semantics for side-effect work (email, webhooks, audit sinks)
+///    belongs outside the factory pipeline — consumers can build it with
+///    <c>Task.Run</c> + <c>IServiceScopeFactory.CreateScope()</c> directly.
+/// 2. Keeping <c>[FactoryEventHandler]</c> focused on transactional,
+///    caller-scope handlers avoids the two-models-one-API confusion.
+/// </remarks>
+#region attributes-factoryeventhandler
+[FactoryEventHandler<OrderPlacedEvent>]
+public static partial class OrderNotifyHandlers
+{
+    internal static async Task SendOrderConfirmation(
+        OrderPlacedEvent orderEvent,
+        [Service] INotificationService notificationService,
+        CancellationToken cancellationToken)
+    {
+        await notificationService.SendAsync(
+            orderEvent.CustomerEmail,
+            $"Order {orderEvent.OrderId} confirmed!");
+    }
+}
+#endregion
+
+/// <summary>
+/// Demonstrates: multiple handlers for the same event type.
+/// Both handlers run in the caller's scope, sequentially, in unspecified order.
+/// A failure in either one aborts the remaining handler and propagates to the caller.
+/// </summary>
+[FactoryEventHandler<OrderPlacedEvent>]
+public static partial class OrderAuditHdlrs
+{
+    static async Task AuditOrderPlaced(
+        OrderPlacedEvent orderEvent,
+        [Service] INotificationService notificationService,
+        CancellationToken cancellationToken)
+    {
+        await notificationService.SendAsync(
+            "audit@example.com",
+            $"Audit: Order {orderEvent.OrderId} placed by {orderEvent.CustomerEmail}");
+    }
+}
+
+// =============================================================================
+// NESTED-RECORD EVENT: automatic IL-trimming preservation
+// =============================================================================
+//
+// Declaring any concrete FactoryEventBase descendant is enough: the generator
+// discovers it (no handler or subscription required) and emits preservation for
+// BOTH the event and its nested property graph in the per-assembly
+// DTZeroEventPreservationRegistrar:
+//
+//   DtoConstructorRegistry.PreserveType<OrderShippedEvent>();
+//   DtoConstructorRegistry.PreserveType<ShippingAddress>();
+//
+// The PreserveType<T> primitive applies [DynamicallyAccessedMembers(All)] to T,
+// instructing the IL trimmer to keep the record's primary constructor and
+// public properties intact. Without this, a Blazor WASM Release build with
+// PublishTrimmed=true would strip the metadata that DTZeroJsonTypeInfoResolver
+// and RecordBypassConverterFactory need to round-trip the event at runtime.
+// (The [DynamicallyAccessedMembers] annotation on FactoryEventBase itself does
+// NOT do this — DAM does not flow to derived types under ILLink.)
+//
+// Nested records with parameterless ctors (plain DTOs) instead get
+// DtoConstructorRegistry.Register<N>(() => new N()) — same trimming effect.
+//
+// Dictionary<K,V> keys and values are walked too, and so are public fields
+// (v1.10.1): an event exposing Dictionary<string, Payload> gets Payload
+// preserved with no action. The walk cannot reach a member typed as an
+// interface or abstract class whose concrete type is a plain DTO, a tuple
+// element, the element of a non-generic collection subclass, or an object
+// value. Preserve those explicitly in client DI setup, with
+// DtoConstructorRegistry.PreserveType<T>() or Register<T>(() => new T()).
+// =============================================================================
+
+/// <summary>
+/// Nested value object shipped with <see cref="OrderShippedEvent"/>.
+/// A record with a parameterized primary ctor — deserialized via
+/// RecordBypassConverterFactory on the receiving side.
+/// </summary>
+#region trimming-event-nested-record
+public record ShippingAddress(string Street, string City, string PostalCode);
+
+/// <summary>
+/// Event object raised when an order ships. Demonstrates an event record with
+/// a nested record property — the generator automatically emits preservation
+/// for both <c>OrderShippedEvent</c> and <c>ShippingAddress</c> so the event
+/// round-trips correctly in IL-trimmed builds.
+/// </summary>
+public record OrderShippedEvent(Guid OrderId, ShippingAddress Address) : FactoryEventBase;
+#endregion
+
+/// <summary>
+/// Demonstrates: handler for an event with a nested parameterized-record property.
+/// Verifies that the nested record is preserved from IL trimming without any
+/// manual hints on the user side — the generator handles it automatically.
+/// </summary>
+[FactoryEventHandler<OrderShippedEvent>]
+public static partial class OrderShippedHandlers
+{
+    internal static Task NotifyShipped(
+        OrderShippedEvent shipEvent,
+        [Service] INotificationService notificationService,
+        CancellationToken cancellationToken)
+    {
+        return notificationService.SendAsync(
+            "ops@example.com",
+            $"Order {shipEvent.OrderId} shipped to {shipEvent.Address.City}");
+    }
+}

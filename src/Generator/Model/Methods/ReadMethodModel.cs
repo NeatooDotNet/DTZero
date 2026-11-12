@@ -1,0 +1,52 @@
+using System.Collections.Generic;
+using DTZero.FactoryGenerator;
+
+namespace DTZero.Generator.Model;
+
+/// <summary>
+/// Represents a Create or Fetch factory method.
+/// </summary>
+internal sealed record ReadMethodModel : FactoryMethodModel
+{
+    public ReadMethodModel(
+        string name,
+        string uniqueName,
+        string returnType,
+        string serviceType,
+        string implementationType,
+        FactoryOperation operation,
+        bool isRemote = false,
+        bool isTask = false,
+        bool isAsync = false,
+        bool isNullable = false,
+        IReadOnlyList<ParameterModel>? parameters = null,
+        AuthorizationModel? authorization = null,
+        bool isConstructor = false,
+        bool isStaticFactory = false,
+        bool isBool = false,
+        bool isDomainMethodTask = false,
+        bool isDomainMethodNullable = false,
+        bool isInternal = false)
+        : base(name, uniqueName, returnType, serviceType, implementationType, operation,
+               isRemote, isTask, isAsync, isNullable, parameters, authorization, isInternal)
+    {
+        IsConstructor = isConstructor;
+        IsStaticFactory = isStaticFactory;
+        IsBool = isBool;
+        IsDomainMethodTask = isDomainMethodTask;
+        IsDomainMethodNullable = isDomainMethodNullable;
+    }
+
+    public bool IsConstructor { get; }
+    public bool IsStaticFactory { get; }
+    public bool IsBool { get; }
+    /// <summary>
+    /// Whether the underlying domain method (Create/Fetch) returns Task.
+    /// This is different from IsTask which indicates whether the factory method returns Task.
+    /// </summary>
+    public bool IsDomainMethodTask { get; }
+    /// <summary>
+    /// Whether the underlying domain method has a nullable return type.
+    /// </summary>
+    public bool IsDomainMethodNullable { get; }
+}

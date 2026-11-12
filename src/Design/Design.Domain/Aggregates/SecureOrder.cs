@@ -1,0 +1,181 @@
+// =============================================================================
+// DESIGN SOURCE OF TRUTH: ASP.NET Core Policy-Based Authorization
+// =============================================================================
+//
+// This file demonstrates using [AspAuthorize] for ASP.NET Core policy-based
+// authorization on factory methods. Use this when you want to leverage
+// ASP.NET Core's authorization infrastructure (policies, roles, claims).
+//
+// For domain-specific authorization with [AuthorizeFactory<T>], see AuthorizedOrder.cs.
+//
+// =============================================================================
+
+using DTZero;
+
+namespace Design.Domain.Aggregates;
+
+/// <summary>
+/// Public interface for SecureOrder.
+/// </summary>
+public interface ISecureOrder : IFactorySaveMeta
+{
+    int Id { get; set; }
+    string CustomerName { get; set; }
+    decimal Total { get; set; }
+    new bool IsNew { get; set; }
+    new bool IsDeleted { get; set; }
+}
+
+/// <summary>
+/// Order with ASP.NET Core policy-based authorization.
+/// </summary>
+/// <remarks>
+/// DESIGN DECISION: [AspAuthorize] for ASP.NET Core integration
+///
+/// Use [AspAuthorize] when:
+/// - You're using ASP.NET Core Identity
+/// - Authorization is role or policy-based
+/// - You want to leverage existing policy infrastructure
+///
+/// Use [AuthorizeFactory] (custom auth class) when:
+/// - Authorization logic is domain-specific
+/// - You need testable auth without HTTP context
+/// - Different operations have different complex rules
+///
+/// DID NOT DO THIS: Apply [AspAuthorize] at class level for all operations
+///
+/// Reasons:
+/// 1. Different operations often need different authorization
+/// 2. Class-level auth can be combined with method-level for granularity
+/// 3. Some operations (like Create for a new draft) may not need auth
+///
+/// DESIGN DECISION: Internal class with public interface, like Order.cs
+/// </remarks>
+[Factory]
+internal partial class SecureOrder : ISecureOrder
+{
+    public int Id { get; set; }
+    public string CustomerName { get; set; } = string.Empty;
+    public decimal Total { get; set; }
+    public bool IsNew { get; set; } = true;
+    public bool IsDeleted { get; set; }
+
+    // -------------------------------------------------------------------------
+    // Create - No authorization required
+    //
+    // DESIGN DECISION: Create operations often don't need authorization
+    //
+    // Creating a new, unsaved entity doesn't access data, so it is local
+    // (VisionAlignment D14). Authorization is checked when it is saved (Insert).
+    // -------------------------------------------------------------------------
+
+    [Create]
+    public void Create(string customerName)
+    {
+        CustomerName = customerName;
+        IsNew = true;
+    }
+
+    // -------------------------------------------------------------------------
+    // Fetch - Requires authentication
+    //
+    // GENERATOR BEHAVIOR: The factory checks the "RequireAuthenticated" policy
+    // before executing the Fetch operation. If authorization fails, the
+    // factory returns null.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Fetches an order - requires authenticated user.
+    /// </summary>
+    /// <remarks>
+    /// DESIGN DECISION: Policy-based authorization with [AspAuthorize]
+    ///
+    /// The "RequireAuthenticated" policy is registered in Design.Server's
+    /// ServerServices (region authorization-policy-config).
+    ///
+    /// COMMON MISTAKE: Forgetting to register the policy
+    ///
+    /// If the policy isn't registered on the server, ASP.NET Core throws an
+    /// InvalidOperationException naming the missing policy, and the call fails
+    /// with a 500.
+    /// </remarks>
+    #region authorization-policy-apply
+    [Remote, Fetch]
+    [AspAuthorize("RequireAuthenticated")]
+    internal void Fetch(int id)
+    {
+        Id = id;
+        CustomerName = $"Customer_{id}";
+        Total = 100.00m;
+        IsNew = false;
+    }
+    #endregion
+
+    // -------------------------------------------------------------------------
+    // Insert - Requires Admin or Manager role
+    //
+    // DESIGN DECISION: Role-based authorization with Roles property
+    //
+    // Use the Roles property instead of a policy when authorization is
+    // simply "user must have one of these roles". Policies are better
+    // for complex requirements (claims, custom logic).
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Inserts a new order - requires Admin or Manager role.
+    /// </summary>
+    #region authorization-policy-roles
+    [Remote, Insert]
+    [AspAuthorize(Roles = "Admin,Manager")]
+    internal Task Insert()
+    {
+        Id = Random.Shared.Next(1000, 9999);
+        return Task.CompletedTask;
+    }
+    #endregion
+
+    // -------------------------------------------------------------------------
+    // Update - Requires both policy AND role
+    //
+    // DESIGN DECISION: Multiple [AspAuthorize] attributes for defense in depth
+    //
+    // When multiple [AspAuthorize] attributes are applied, ALL must pass.
+    // This enables layered authorization:
+    // 1. First check: User must be authenticated
+    // 2. Second check: User must have the Manager role
+    //
+    // DID NOT DO THIS: OR logic between attributes
+    //
+    // Reasons:
+    // 1. AND logic is safer (more restrictive)
+    // 2. OR logic can be achieved within a single policy
+    // 3. Matches ASP.NET Core's [Authorize] behavior
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Updates an order - requires authentication AND Manager role.
+    /// </summary>
+    #region authorization-policy-multiple
+    [Remote, Update]
+    [AspAuthorize("RequireAuthenticated")]
+    [AspAuthorize(Roles = "Manager")]
+    internal Task Update()
+    {
+        return Task.CompletedTask;
+    }
+    #endregion
+
+    // -------------------------------------------------------------------------
+    // Delete - Requires Admin role only
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Deletes an order - requires Admin role.
+    /// </summary>
+    [Remote, Delete]
+    [AspAuthorize(Roles = "Admin")]
+    internal Task Delete()
+    {
+        return Task.CompletedTask;
+    }
+}

@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+	<!-- Inherits TargetFrameworks (net9.0;net10.0) from Directory.Build.props -->
+
+	<ItemGroup>
+		<PackageReference Include="MudBlazor" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<TrimmableAssembly Include="Person.Ef" />
+		<TrimmableAssembly Include="DTZero.Generator" />
+		<RuntimeHostConfigurationOption Include="DTZero.IsServerRuntime"
+		                                 Value="false"
+		                                 Trim="true" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <ProjectReference Include="..\Person.DomainModel\Person.DomainModel.csproj" />
+	  <ProjectReference Include="..\..\..\Generator\Generator.csproj" OutputItemType="Analyzer" />
+	  <ProjectReference Include="..\..\..\DTZero\DTZero.csproj" />
+	</ItemGroup>
+
+</Project>

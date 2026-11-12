@@ -1,0 +1,142 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using DTZero;
+using System.Reflection;
+
+namespace DTZeroTests.UnitTests.TestContainers;
+
+/// <summary>
+/// Fluent builder for creating a Logical mode DI container for unit testing.
+/// Logical mode executes factory methods locally without serialization.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Use this builder for tests that verify:
+/// - IFactorySave&lt;T&gt; resolution and behavior
+/// - factory.Save() with [Remote] methods executing locally
+/// - Single-tier application scenarios
+/// </para>
+/// <para>
+/// Logical mode behaves identically to Server mode - both execute methods locally
+/// without any serialization. The difference is semantic:
+/// - Server mode: "I am an ASP.NET Core server"
+/// - Logical mode: "I am a single-tier app or unit test"
+/// </para>
+/// <para>
+/// For tests that need to validate serialization round-trips, use
+/// <see cref="DTZeroTests.IntegrationTests.TestContainers.ClientServerContainers"/> instead.
+/// </para>
+/// </remarks>
+public sealed class LogicalContainerBuilder
+{
+    private readonly ServiceCollection _services = new();
+
+    public LogicalContainerBuilder()
+    {
+        _services.AddDTZero(
+            DTZeroFactory.Logical,
+            new DTZeroSerializationOptions { Format = SerializationFormat.Ordinal },
+            Assembly.GetExecutingAssembly()
+        );
+        _services.AddLogging(builder => builder.AddProvider(NullLoggerProvider.Instance));
+
+        // Register all [Factory] decorated types
+        RegisterFactoryTypes();
+    }
+
+    /// <summary>
+    /// Registers a service implementation for testing.
+    /// </summary>
+    public LogicalContainerBuilder WithService<TInterface, TImpl>()
+        where TImpl : class, TInterface
+        where TInterface : class
+    {
+        _services.AddScoped<TInterface, TImpl>();
+        return this;
+    }
+
+    /// <summary>
+    /// Registers a singleton service implementation for testing.
+    /// </summary>
+    public LogicalContainerBuilder WithSingleton<TInterface, TImpl>()
+        where TImpl : class, TInterface
+        where TInterface : class
+    {
+        _services.AddSingleton<TInterface, TImpl>();
+        return this;
+    }
+
+    /// <summary>
+    /// Registers a transient service implementation for testing.
+    /// </summary>
+    public LogicalContainerBuilder WithTransient<TInterface, TImpl>()
+        where TImpl : class, TInterface
+        where TInterface : class
+    {
+        _services.AddTransient<TInterface, TImpl>();
+        return this;
+    }
+
+    /// <summary>
+    /// Registers a pre-existing instance as a singleton.
+    /// </summary>
+    public LogicalContainerBuilder WithInstance<TInterface>(TInterface instance)
+        where TInterface : class
+    {
+        _services.AddSingleton(instance);
+        return this;
+    }
+
+    /// <summary>
+    /// Provides access to the underlying service collection for advanced scenarios.
+    /// </summary>
+    public LogicalContainerBuilder ConfigureServices(Action<IServiceCollection> configure)
+    {
+        configure(_services);
+        return this;
+    }
+
+    /// <summary>
+    /// Builds and returns the service provider.
+    /// </summary>
+    public IServiceProvider Build() => _services.BuildServiceProvider();
+
+    /// <summary>
+    /// Builds the service provider and creates a scoped service provider.
+    /// Returns both the root provider (for disposal) and a scope.
+    /// </summary>
+    public (ServiceProvider provider, IServiceScope scope) BuildWithScope()
+    {
+        var provider = _services.BuildServiceProvider();
+        var scope = provider.CreateScope();
+        return (provider, scope);
+    }
+
+    /// <summary>
+    /// Registers all types decorated with [Factory] attribute as scoped services.
+    /// This mirrors the behavior of ClientServerContainers.RegisterIfAttribute().
+    /// </summary>
+    /// <remarks>
+    /// Infrastructure reflection for DI registration is acceptable per project guidelines.
+    /// </remarks>
+    private void RegisterFactoryTypes()
+    {
+        foreach (var type in Assembly.GetExecutingAssembly().GetTypes())
+        {
+            // Skip generic types and abstract types
+            if (type.GenericTypeArguments.Length > 0 || type.IsAbstract)
+                continue;
+
+            // Check for [Factory] attribute
+            if (type.GetCustomAttribute<FactoryAttribute>() == null)
+                continue;
+
+            // Skip records (they have a compiler-generated <Clone>$ method)
+            if (type.GetMethod("<Clone>$") != null)
+                continue;
+
+            _services.AddScoped(type);
+        }
+    }
+}

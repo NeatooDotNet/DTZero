@@ -1,0 +1,3 @@
+127:            DtoConstructorRegistry.Register<global::DTZeroTests.TrimmingTests.TrimDictValue>(() => new global::DTZeroTests.TrimmingTests.TrimDictValue());
+128:            DtoConstructorRegistry.Register<global::DTZeroTests.TrimmingTests.TrimFieldHost>(() => new global::DTZeroTests.TrimmingTests.TrimFieldHost());
+129:            DtoConstructorRegistry.Register<global::DTZeroTests.TrimmingTests.TrimFieldCarried>(() => new global::DTZeroTests.TrimmingTests.TrimFieldCarried());

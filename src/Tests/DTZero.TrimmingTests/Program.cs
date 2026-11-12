@@ -1,0 +1,416 @@
+using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
+using DTZero;
+using DTZeroTests.TrimmingTests;
+
+// Build a service collection with DTZero registrations.
+// The generated FactoryServiceRegistrar will register the factory and delegates.
+// Server-only service registrations are guarded by the feature switch
+// so the trimmer can remove them.
+var services = new ServiceCollection();
+
+// Exercise the assembly-attribute discovery path (RegisterFactories via AddDTZero).
+// This is the primary registration mechanism — it uses [assembly: DTZeroFactoryRegistrar(typeof(X))]
+// to discover all factory types in a trimming-safe way.
+services.AddDTZero(DTZeroFactory.Remote, typeof(TrimTestEntity).Assembly);
+
+// Remote-mode factories resolve a keyed HttpClient for the server call channel
+// (standard client setup, e.g. Design.Client.Blazor). The harness never sends a
+// request — the registration only has to satisfy resolution. A no-op handler
+// keeps SocketsHttpHandler (and its System.Net.Security dependency, trimmed out
+// of this full-trim publish) from being constructed.
+services.AddKeyedScoped(DTZeroServices.HttpClientKey,
+    (sp, key) => new HttpClient(new NoOpHttpHandler()) { BaseAddress = new Uri("https://localhost/") });
+
+// Client-safe dependency of the bare [Execute] pair (EXRM-003). Registered
+// OUTSIDE the guard below on purpose: a bare [Execute] carries no [Remote], so its
+// registration is unguarded and it resolves its [Service] parameters from whichever
+// container runs the call — on a client publish, the client's. A bare target
+// depending on a server-only port would fail at call time instead, which is a
+// different property. See ClientSafePorts.cs for why this type's NAME is not a gate
+// assertion: being rooted from DI unconditionally, a "present" check on it could
+// never go red.
+services.AddScoped<IClientTallyPort, ClientTallyEngine>();
+
+// Guard server-only DI registrations behind the feature switch.
+// If these were registered unconditionally, the types would be kept alive
+// by the DI container regardless of the feature switch in generated code.
+if (DTZeroRuntime.IsServerRuntime)
+{
+    services.AddScoped<IServerOnlyRepository, ServerOnlyRepository>();
+
+    // Per-leg server-only dependencies (TRIM-008). Same guard, same reason: a
+    // registration outside it would root the implementation from the DI graph
+    // and mask whatever the generator's own preservation is doing.
+    services.AddScoped<IRelayLegPort, RelayLegBackend>();
+    services.AddScoped<IIfaceLegPort, IfaceLegBackend>();
+    services.AddScoped<ISaveLegPort, SaveLegBackend>();
+    services.AddScoped<IClassLegPort, ClassLegBackend>();
+    services.AddScoped<IAsyncLegPort, AsyncLegBackend>();
+    services.AddScoped<IExecLegPort, ExecLegBackend>();
+
+    // Server-side implementations behind the interface factories. On the client the
+    // generated proxies stand in for them, so they are never registered there.
+    services.AddScoped<ITrimIfaceQuery, TrimIfaceServerSide>();
+    services.AddScoped<ITrimAsyncIfaceQuery, TrimAsyncIfaceServerSide>();
+}
+
+// Every named check appends to failedChecks; the process exits non-zero if any
+// check failed. Per-check console lines stay as the failure forensics in CI logs.
+var failedChecks = new List<string>();
+
+ServiceProvider sp;
+try
+{
+    sp = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+    Console.WriteLine("ServiceProvider built successfully with ValidateOnBuild=true.");
+}
+catch (AggregateException ex)
+{
+    Console.WriteLine($"ServiceProvider construction FAILED (AggregateException):");
+    foreach (var inner in ex.InnerExceptions)
+    {
+        Console.WriteLine($"  - {inner.GetType().Name}: {inner.Message}");
+    }
+    Console.WriteLine("Exiting due to service validation failure.");
+    return 1;
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"ServiceProvider construction FAILED: {ex.GetType().Name}: {ex.Message}");
+    Console.WriteLine("Exiting due to service validation failure.");
+    return 1;
+}
+
+// Factories are registered scoped; resolve within a scope (root resolution
+// throws under ValidateScopes=true).
+using var checkScope = sp.CreateScope();
+
+// Verify class factory survived trimming (regression test).
+ITrimTestEntityFactory? factory = null;
+try
+{
+    factory = checkScope.ServiceProvider.GetService<ITrimTestEntityFactory>();
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Class factory resolution FAILED: {ex.GetType().Name}: {ex.Message}");
+}
+if (factory == null)
+{
+    failedChecks.Add("class factory resolution");
+}
+
+// Verify static factory delegate survived trimming (the original bug scenario).
+TrimTestCommands.DoWork? doWorkDelegate = null;
+try
+{
+    doWorkDelegate = checkScope.ServiceProvider.GetService<TrimTestCommands.DoWork>();
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"DoWork delegate resolution FAILED: {ex.GetType().Name}: {ex.Message}");
+}
+if (doWorkDelegate == null)
+{
+    failedChecks.Add("static factory delegate resolution");
+}
+
+// Verify the interface-factory leg still registers after trimming (TRIM-008).
+// This is the positive control for that leg: the DAM-preservation question is
+// asked with absence greps, and an absence grep passes just as well when the
+// feature is dead. Resolving the generated proxy proves it is not.
+ITrimIfaceQueryFactory? ifaceFactory = null;
+try
+{
+    ifaceFactory = checkScope.ServiceProvider.GetService<ITrimIfaceQueryFactory>();
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Interface factory resolution FAILED: {ex.GetType().Name}: {ex.Message}");
+}
+if (ifaceFactory == null)
+{
+    failedChecks.Add("interface factory resolution");
+}
+
+// The async interface-factory variant needs its own resolution check. Its type name survives
+// via the assembly attribute's DAM whether or not registration works, so asserting it PRESENT
+// in the CI gate without resolving it here would be the "absence assertions pass more easily
+// when registration is dead" hazard (plan review B2) applied to a positive control.
+ITrimAsyncIfaceQueryFactory? asyncIfaceFactory = null;
+try
+{
+    asyncIfaceFactory = checkScope.ServiceProvider.GetService<ITrimAsyncIfaceQueryFactory>();
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Async interface factory resolution FAILED: {ex.GetType().Name}: {ex.Message}");
+}
+if (asyncIfaceFactory == null)
+{
+    failedChecks.Add("async interface factory resolution");
+}
+
+// Verify the Save/Can* leg still registers after trimming (TRIM-008).
+// Positive control for the write half of the class-factory shape.
+ITrimSaveTargetFactory? saveFactory = null;
+try
+{
+    saveFactory = checkScope.ServiceProvider.GetService<ITrimSaveTargetFactory>();
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Save target factory resolution FAILED: {ex.GetType().Name}: {ex.Message}");
+}
+if (saveFactory == null)
+{
+    failedChecks.Add("save target factory resolution");
+}
+
+// Verify the class-level [Execute] factory survived trimming (TRIM-009, plan-review A3).
+// This leg is emitted async unconditionally and had no harness coverage before TRIM-009.
+ITrimExecTargetFactory? execFactory = null;
+try
+{
+    execFactory = checkScope.ServiceProvider.GetService<ITrimExecTargetFactory>();
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Class [Execute] factory resolution FAILED: {ex.GetType().Name}: {ex.Message}");
+}
+if (execFactory == null)
+{
+    failedChecks.Add("class [Execute] factory resolution");
+}
+
+// NOTE: the [FactoryEventHandler<T>] leg has NO positive control here, and cannot.
+// RelayHandlerRenderer wraps every RegisterHandler call in
+// `if (DTZeroRuntime.IsServerRuntime)`, so on a client publish the generated
+// registrar body folds away entirely — there is no service, delegate, or registry
+// entry left to resolve. Its registration counter-signal lives in the untrimmed
+// integration suite (FactoryEventHandlerTargets), not in this harness.
+
+// The async [Execute] delegate needs its own resolution check for the same reason as the
+// async interface factory: without it, _DoAsyncWork's markers could go absent because the
+// delegate stopped generating rather than because trimming removed the body, and the gate
+// would stay green.
+TrimTestCommands.DoAsyncWork? doAsyncWorkDelegate = null;
+try
+{
+    doAsyncWorkDelegate = checkScope.ServiceProvider.GetService<TrimTestCommands.DoAsyncWork>();
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"DoAsyncWork delegate resolution FAILED: {ex.GetType().Name}: {ex.Message}");
+}
+if (doAsyncWorkDelegate == null)
+{
+    failedChecks.Add("async static factory delegate resolution");
+}
+
+// THE BARE HALF OF THE [Execute] PAIR (EXRM-003), on both shapes.
+//
+// Every check above this point asks whether a name SURVIVED. These two ask whether
+// a bare [Execute] still RUNS on a trimmed client — resolve it, call it, and read
+// the marker back out of the result. That distinction is the reason they exist:
+// the gate's absence checks cannot tell "the guard folded" from "the feature is
+// dead", and neither can a present-only grep. A returned marker can.
+//
+// If either body were guarded (the regression this pair watches for), the guard
+// folds to a throw on a client publish and these fail here as well as in the gate.
+// Nothing crosses the wire: bare [Execute] registers no remote delegate, and the
+// harness's NoOpHttpHandler throws on any send, so a mis-routed call fails loudly
+// rather than silently passing.
+//
+// THESE CHECKS MUST NEVER NAME A GATE MARKER, and the first draft of them did.
+// Program.cs is the entry point and is never trimmed, so a "BareStaticBody_MARKER"
+// literal HERE roots that string in the published assembly all by itself — and
+// verify-trimmed.sh's PRESENT check for it then passes no matter what happened to
+// the [Execute] body. Measured, not theorised: with the marker literals in this
+// file, the known-bad variant (both bare targets carrying [Remote], bodies guarded
+// and folded away) still passed the gate while failing the two checks below.
+// So the bodies stamp their result through the client-safe port, and what is
+// matched here is that stamp plus the caller's own input token — neither of which
+// is a marker. The markers live in the [Execute] bodies and nowhere else.
+
+// Static shape: a bare [Execute] delegate, resolved and invoked.
+try
+{
+    var computeTally = checkScope.ServiceProvider.GetService<TrimTestCommands.ComputeTally>();
+    if (computeTally == null)
+    {
+        failedChecks.Add("bare static [Execute] delegate resolution");
+    }
+    else
+    {
+        var tallyResult = computeTally("bare-static").GetAwaiter().GetResult();
+        if (tallyResult == null
+            || !tallyResult.Contains("bare-static", StringComparison.Ordinal)
+            || !tallyResult.Contains("|tallied:", StringComparison.Ordinal))
+        {
+            Console.WriteLine($"Bare static [Execute] invocation FAILED: expected the caller's token and the client-safe port's stamp in the result, got \"{tallyResult}\".");
+            failedChecks.Add("bare static [Execute] invocation");
+        }
+        else
+        {
+            Console.WriteLine("Bare static [Execute] ran on the trimmed client, through the client-safe port.");
+        }
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Bare static [Execute] FAILED: {ex.GetType().Name}: {ex.Message}");
+    failedChecks.Add("bare static [Execute] invocation");
+}
+
+// Static shape, async: the bare sibling of _DoAsyncWork.
+try
+{
+    var computeTallyAsync = checkScope.ServiceProvider.GetService<TrimTestCommands.ComputeTallyAsync>();
+    if (computeTallyAsync == null)
+    {
+        failedChecks.Add("bare async static [Execute] delegate resolution");
+    }
+    else
+    {
+        var asyncTallyResult = computeTallyAsync("bare-static-async").GetAwaiter().GetResult();
+        if (asyncTallyResult == null
+            || !asyncTallyResult.Contains("bare-static-async", StringComparison.Ordinal)
+            || !asyncTallyResult.Contains("|tallied:", StringComparison.Ordinal))
+        {
+            Console.WriteLine($"Bare async static [Execute] invocation FAILED: expected the caller's token and the client-safe port's stamp in the result, got \"{asyncTallyResult}\".");
+            failedChecks.Add("bare async static [Execute] invocation");
+        }
+        else
+        {
+            Console.WriteLine("Bare async static [Execute] ran on the trimmed client, through the client-safe port.");
+        }
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Bare async static [Execute] FAILED: {ex.GetType().Name}: {ex.Message}");
+    failedChecks.Add("bare async static [Execute] invocation");
+}
+
+// Class shape: a bare [Execute] factory method, resolved and invoked.
+try
+{
+    var bareExecFactory = checkScope.ServiceProvider.GetService<ITrimExecTargetFactory>();
+    if (bareExecFactory == null)
+    {
+        failedChecks.Add("bare class [Execute] factory resolution");
+    }
+    else
+    {
+        var bareResult = bareExecFactory.RunBareCommand("bare-class").GetAwaiter().GetResult();
+        if (bareResult?.ExecResult == null
+            || !bareResult.ExecResult.Contains("bare-class", StringComparison.Ordinal)
+            || !bareResult.ExecResult.Contains("|tallied:", StringComparison.Ordinal))
+        {
+            Console.WriteLine($"Bare class [Execute] invocation FAILED: expected the caller's token and the client-safe port's stamp in the result, got \"{bareResult?.ExecResult}\".");
+            failedChecks.Add("bare class [Execute] invocation");
+        }
+        else
+        {
+            Console.WriteLine("Bare class [Execute] ran on the trimmed client, through the client-safe port.");
+        }
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Bare class [Execute] FAILED: {ex.GetType().Name}: {ex.Message}");
+    failedChecks.Add("bare class [Execute] invocation");
+}
+
+// Direct feature switch test: verifies that the trimmer constant-folds
+// DTZeroRuntime.IsServerRuntime and removes dead code.
+if (!DirectFeatureSwitchTest.Run())
+{
+    failedChecks.Add("feature switch constant fold");
+}
+
+// Event relay smoke test: verifies a FactoryEventBase descendant survives trimming
+// and round-trips through FactoryEventTypeRegistry → FactoryEventDeserializer → IFactoryEventRelay.
+if (!EventRelaySmokeTest.Run())
+{
+    failedChecks.Add("event relay smoke");
+}
+
+// Record DTO smoke test (TRIM-001): positional records in factory signatures are
+// preserved by generator-emitted PreserveType and deserialize on the trimmed client.
+if (!RecordDtoSmokeTest.Run())
+{
+    failedChecks.Add("record DTO preservation");
+}
+
+// Entity property DTO smoke test (TRIM-002): DTOs reachable only as [Factory]
+// entity properties are preserved by the entity property-graph walk.
+if (!EntityPropertyDtoSmokeTest.Run())
+{
+    failedChecks.Add("entity property DTO preservation");
+}
+
+// Subscribe-only event smoke test (TRIM-003 repro / TRIM-007 fix): a
+// FactoryEventBase descendant whose only static reference is a generic
+// Subscribe<TEvent> call site survives trimming via the generator-emitted
+// per-assembly event-preservation registrar.
+if (!EventSubscribeOnlySmokeTest.Run())
+{
+    failedChecks.Add("subscribe-only event preservation");
+}
+
+// Dictionary-value DTO smoke test (DICT-001): a DTO reachable only as a dictionary
+// value type, whose only construction site is an async [Remote] body trimmed from
+// this client. It survives only through the walk's dictionary-entry unwrapping, and
+// was observed red against the generator before the walk had it.
+if (!DictionaryAndFieldDtoSmokeTest.RunDictionaryValue())
+{
+    failedChecks.Add("dictionary-value DTO preservation");
+}
+
+// Public-field DTO smoke test (DICT-001): a DTO reachable only through a public
+// field of a walked DTO. It survives only through the walk's field visit, and was
+// observed red against the generator before the walk had it. Separate from the
+// dictionary check so one red cannot hide the other.
+if (!DictionaryAndFieldDtoSmokeTest.RunPublicField())
+{
+    failedChecks.Add("public-field DTO preservation");
+}
+
+// IFactorySaveMeta round trip (EXSET-016): a public-setter save target with no
+// ordinal converter keeps IsNew and IsDeleted across serialization, in both
+// formats. It survives only through the generator's PreserveProperties emission,
+// and was observed red against the generator before it had one.
+if (!SaveMetaRoundTripSmokeTest.Run())
+{
+    failedChecks.Add("save meta round trip without ordinal converter");
+}
+
+Console.WriteLine($"IsServerRuntime: {DTZeroRuntime.IsServerRuntime}");
+Console.WriteLine($"Class factory resolved: {factory != null}");
+Console.WriteLine($"Static factory delegate resolved: {doWorkDelegate != null}");
+Console.WriteLine($"Interface factory resolved: {ifaceFactory != null}");
+Console.WriteLine($"Async interface factory resolved: {asyncIfaceFactory != null}");
+Console.WriteLine($"Save target factory resolved: {saveFactory != null}");
+Console.WriteLine($"Class [Execute] factory resolved: {execFactory != null}");
+
+if (failedChecks.Count > 0)
+{
+    Console.WriteLine($"Trimming verification FAILED ({failedChecks.Count} check(s)): {string.Join(", ", failedChecks)}");
+    return 1;
+}
+
+Console.WriteLine("Trimming verification app completed. All checks passed.");
+return 0;
+
+/// <summary>
+/// The harness resolves Remote-mode factories but never calls the server;
+/// any actual send is a harness bug.
+/// </summary>
+internal sealed class NoOpHttpHandler : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        => throw new NotSupportedException("The trimming harness never sends HTTP requests.");
+}

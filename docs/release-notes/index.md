@@ -1,0 +1,198 @@
+---
+layout: default
+title: "Release Notes"
+description: "Version history and release notes for DTZero"
+nav_order: 10
+has_children: true
+---
+
+# Release Notes
+
+Version history for DTZero NuGet packages.
+
+## Highlights
+
+Releases with new features, breaking changes, or bug fixes.
+
+| Version | Date | Highlights |
+|---------|------|------------|
+| [v2.0.0](v2.0.0.md) | 2026-11-11 | **Breaking**: the first release under the DTZero name. Every public name changes, and behavior does not. |
+| [v1.10.9](v1.10.9.md) | 2026-10-16 | **Fix**: a refusal from `[AuthorizeFactory<T>]` on an **interface-factory method or a static `[Execute]`** escaped `UseDTZero()` as an **HTTP 500**, so the client threw `HttpRequestException` and the type, message and `Context` were lost (#10). The endpoint now answers 403 with a body marked `X-DTZero-Not-Authorized`, and the client rethrows the same `NotAuthorizedException`. Refusals are logged at Warning (server, 7009) and Information (client, 3013), not as failures. A 403 without the header still throws `HttpRequestException`. Update client and server; no breaking changes. |
+| [v1.10.8](v1.10.8.md) | 2026-10-16 | **Fix**: when the browser abandoned a remote call (reload, navigation), the endpoint let the `OperationCanceledException` escape, so the server **recorded an HTTP 500 and request logging wrote it at Error** with a stack trace (#15). A client that leaves now ends the request with 499 and nothing escapes. A server that is stopping answers 503, which the client reads as `HttpRequestException.StatusCode`. Any other cancellation still fails as a 500. Update the server; no breaking changes. |
+| [v1.10.7](v1.10.7.md) | 2026-10-16 | **Security fix**: `[AuthorizeFactory<T>]` on a static factory's `[Execute]` was **never checked**: the auth class only decided whether the call went to the server. It now runs before the command, and a refusal throws `NotAuthorizedException`. **Fix**: in the default Ordinal format a `[Factory]` object **shared by two properties arrived as two copies**, and a **back reference threw "possible object cycle"** (#22). Objects are now written as `{"$id","$values"}` and a repeat as `{"$ref"}`; a back reference into a class with `init` or `required` properties fails with a `JsonException` naming the type. **Fix**: a trimmed client sent `{}` for a class factory without an ordinal converter, so **every Save became an Insert**. **Fix**: a relay batch could carry another call's events when calls shared a scope. **Fix**: `HttpRequestException.StatusCode` was null. Wire shape changes: **deploy client and server together**. No breaking changes. |
+| [v1.10.6](v1.10.6.md) | 2026-10-13 | **Security fix**: `[AspAuthorize]` on a class-factory operation **let a caller who was not signed in through**. A request with no credentials authenticates to `NoResult`, whose failure message is null, and `Authorized` reads a null refusal as allowed, so the policy was never evaluated. A policy handler calling `context.Fail()` without naming a requirement was let through the same way. Both are now refused (`NotAuthorizedException` on the client). Exposed: any server whose `/api/dtzero` admits anonymous requests. Static `[Execute]` and interface factories already refused both with 403. Update the server; no breaking changes. |
+| [v1.10.5](v1.10.5.md) | 2026-10-13 | **Fix**: `AddDTZero` called twice (Neatoo's `AddNeatooServices` plus `AddDTZeroAspNetCore`) replaced `IServiceAssemblies` and re-added the interface converter, so **every remote Save on a Neatoo server failed** (#16); a second call now adds only what is new, in either order. **Fix**: `[AspAuthorize]` on a static-factory `[Execute]` was **never enforced** (#5); the server now checks it before the command runs and answers a refusal with 403. Needs `IAspAuthorize` (`AddDTZeroAspNetCore`); see the migration note. No breaking changes. |
+| [v1.10.4](v1.10.4.md) | 2026-10-12 | **Fix**: a method on a `[Factory]` interface returning non-generic `Task` generated `Task<Task>` and failed the consumer's build with CS0738/CS0266 **inside the generated file**, with no NF diagnostic: v1.10.2's `[Execute]` defect (#13) on the interface-factory leg. It now generates a `Task` method: awaited to completion, a server exception rethrown at the await, no result read; `[AuthorizeFactory<T>]` checks still run. Known and not fixed here: an auth parameter some interface methods lack still fails CS7036 (#19). No breaking changes. |
+| [v1.10.3](v1.10.3.md) | 2026-10-12 | **Fix**: a `partial` `[Factory]` class deriving from `List<T>` reached the other tier **empty** in the default Ordinal format. The generator treated the collection as an object and wrote its one public settable property, `Capacity`, instead of its items, with no exception. A collection now serializes as an array of its items in both formats, each item in that format's shape. Unaffected: non-`partial` collection classes, collection classes with constructor-injected services, and Neatoo lists. Update client and server together. No breaking changes. |
+| [v1.10.2](v1.10.2.md) | 2026-10-10 | **Fix**: a static `[Execute]` returning non-generic `Task` generated a `Task<Task>` delegate and failed the consumer's build with CS0266/CS1662 **inside the generated file**, although NF0102 has always accepted a `Task` return, so no rule named the cause. It now generates a `Task` delegate: awaited to completion, a server exception rethrown at the await, no result read. The skill and Design had taught the opposite ("must return `Task<T>`", with a `Task<bool>` that always returned `true`); both now say `Task` when there is no result. One default member added in `DTZero.Internal` (`IMakeRemoteDelegateRequest.ForDelegateNoResult`); existing implementations compile unchanged. Class-level `[Execute]` is unchanged. No breaking changes. |
+| [v1.10.1](v1.10.1.md) | 2026-10-09 | **Fix**: the DTO walk that decides what a publish-trimmed client keeps missed **dictionary keys and values** — a dictionary enumerates `KeyValuePair<K,V>`, a `System` type the walk rejects — and types reachable only through a **public field**, although the serializer runs with `IncludeFields` on. A DTO reachable only that way was trimmed and failed on the client with a no-constructor `NotSupportedException` (`DeserializeNoConstructor` in Blazor WebAssembly). Hidden until v1.7.0 stopped shipping async `[Remote]` bodies, whose `new T()` had rooted such types by accident; a consumer upgrading from v1.5.0 hit it. Both shapes are now walked, as are collections nested in collections and a consumer's own generic collections. Observed red on the publish-trimmed harness before the fix. No API change; rebuild to pick it up. |
+| [v1.10.0](v1.10.0.md) | 2026-10-09 | **Fix**: `NotAuthorizedException` could be thrown with an **empty** `Message` — the case for every authorization method returning a bare `false`, since only the `string?` return shapes can carry a reason. An empty message is not merely unhelpful: Application Insights rejects exception telemetry without one, so a consumer's nightly job logged four errors a night into nothing for ~4 months (measured: 206 Information and 3 Warning records arrived, 4 Error records did not). The message is now never empty and names what was refused — `Authorization denied for operation Save on IVisitV2; no reason was supplied.` — and on interface factories it names which auth method refused. **Messages your auth methods supply are used verbatim, unchanged.** Two tiers: updating the package alone stops the telemetry drop; rebuilding adds the operation and type. **Feat**: `NotAuthorizedException.Context` and `.Authorized` expose the refused operation and result as properties for structured logging, via a new `(Authorized, string?)` constructor — additive API, which is why this is a minor and not a patch under [v1.0.0's stability commitment](v1.0.0.md#api-stability-commitment). **Behaviour note**: code comparing a denial's `Message` to `""` changes; code that logs or exports it gets strictly better. No breaking changes. |
+| [v1.9.0](v1.9.0.md) | 2026-09-08 | **Breaking (behaviour)**: `[Execute]` now obeys `[Remote]` like every other operation. A bare `[Execute]` gets one unguarded local registration in every mode and no remote delegate — it runs on whichever tier resolves it, takes its `[Service]` parameters from that tier's container, and ships to a trimmed WASM client and runs there, which is the capability this release exists for. `[Remote, Execute]` is unchanged from v1.8.1. **What breaks**: a bare `[Execute]` (`private static` on a static factory, `public static` on a class factory) that resolved a server-only `[Service]` used to reach the server anyway and now throws a DI error where it was called — add `[Remote]`. Unaffected: `internal static` on a class factory (still server-only, guarded), and anything whose `[AspAuthorize]` or `[Remote]` auth method already forces the server. **Breaking (signature)**: a class-level `[Execute]` under `[AuthorizeFactory]`/`[AspAuthorize]` now generates `Task<T?>` — see the fix below. **Fix**: that shape previously declared `Task<T>` while returning `Authorized<T>.Result`, so it failed CS8603 under `TreatWarningsAsErrors` and, without it, handed `null` back through a non-null signature. **Measured, not inferred**: the trimming gate asserts three matched pairs — `[Remote]` body absent, bare body present and still running on the trimmed client. Departs from v1.0.0's API Stability Commitment under a minor bump, deliberately; **upgrade client and server together**. |
+| [v1.8.1](v1.8.1.md) | 2026-09-01 | **Fix**: a client-initiated `IFactoryEvents.Raise` never relayed anything back. `MakeRemoteDelegateRequest.ForDelegateEvent` awaited the round-trip and discarded the `RemoteResponseDto` — so events raised by server handlers of a client raise reached nobody, silently. The server was always correct; the batch was built and on the wire, and only the client half was missing. Relay dispatch is now one shared implementation across both call paths. **Behaviour note**: consumers who use client-side `Raise` *and* register an `IFactoryEventRelay` start receiving batches they were not receiving before, including their own raised event (`ServerOnly` opts out). The relay contract now reads "once per remote **round-trip**" — a `[Remote]` factory call or a client `Raise`. Client-side `Raise` is now documented as supported; the anti-pattern that forbade it gave a reason that was factually wrong. **Fix (v1.8.0 regression)**: a `[FactoryEventHandler<T>]` with a `[Service]` parameter of a *generated* factory interface (`[Service] IPlanFactory` beside `[Factory] Plan`) emitted `global::IPlanFactory` and failed the consumer's build with CS0400 — the same-run interface is an error type at generation time, so it is now emitted as written and resolved by the copied usings. No breaking changes. |
+| [v1.8.0](v1.8.0.md) | 2026-08-31 | **Feat**: `[FactoryEventHandler<T>]` gains a **dispatch phase** — `Immediate` (unchanged default), `AfterFlush` (in-transaction, drained by you via `IFactoryEventPhaseCoordinator`), `AfterCommit` (drained when the entry factory call completes, no ambient transaction, exceptions logged and swallowed). Cross-phase ordering is a framework guarantee anchored **per drain point**; failed entry calls discard queued work. Opt-in same-event coalescing via `Coalesce = true`. Events raised by `AfterCommit` handlers still reach the same response's relay batch. New diagnostics **NF0504** (duplicate same-event attribute) and **NF0505** (`Coalesce` inert at `Immediate`), both Warning. **Fix**: three generator defects affecting **any** `[Factory]` type — generated code bound to the wrong type under a shadowing consumer namespace; attributes split across partial declarations crashed the generator with CS8785, taking *every* factory in the assembly with it; return types bound wrong under shadowing (CS0029/CS0738). **Behaviour note**: log ids 9001–9009, freed when v1.5.0 deleted the `[Event]` API, now mean phased dispatch — re-read the table if you alert on them. No breaking changes. |
+| [v1.7.0](v1.7.0.md) | 2026-08-14 | **Fix**: `[Remote]` method bodies no longer ship to trimmed Blazor WASM clients. Two mechanisms: the registrar attribute's `[DynamicallyAccessedMembers]` named the consumer's own class (`[Execute]` static factories and `[FactoryEventHandler<T>]` classes, since v0.21.2) — now a single-method forwarding holder; and the `IsServerRuntime` guard did not fold inside an `async` state machine (**every class factory with an async operation**) — now a non-async wrapper forwarding to a private core. **Feat**: positional-record DTOs, DTOs carried as `[Factory]` entity properties, and `FactoryEventBase` descendants reachable only from a subscription lambda are now preserved (DAM does **not** flow to derived types under ILLink). **Perf**: incremental caching restored on the relay-handler branch. **Behaviour change**: the server-only guard throws synchronously rather than as a faulted `Task`. Interface factories are explicitly carved out — body removal there is *not established*. |
+| [v1.6.1](v1.6.1.md) | 2026-05-24 | **Fix**: `[Factory]` classes whose only operation is `[Execute]` and whose ctor requires DI services were not registered as transients by the generator. Client-side deserialization could not resolve such types via `GetRequiredService`, so the ctor never ran and ctor-injected services stayed null. `requiresEntityRegistration` now also fires when `typeInfo.RequiresServiceInstantiation` is true. |
+| [v1.6.0](v1.6.0.md) | 2026-04-25 | **Feat**: new generator diagnostic **NF0106** — factory-operation attribute (`[Create]`/`[Fetch]`/`[Insert]`/`[Update]`/`[Delete]`/`[Execute]`) on a `[Factory]` interface method. Replaces cryptic CS0111/CS0738 duplicate-codegen errors with one clear diagnostic. Design project + skill gain interface-factory `[AuthorizeFactory<T>]` pedagogy (`AuthorizedRepository.cs`, 10 tests, snippet-backed skill section) demonstrating the shipped Execute/Read + parameter-matching model. No breaking changes. |
+| [v1.5.0](v1.5.0.md) | 2026-04-14 | **Breaking**: entire `[Event]` method attribute API deleted — `EventAttribute`, `FactoryOperation.Event`, `AuthorizeFactoryOperation.Event`, `IEventTracker`, `IEventScopeInitializer`, `EventTrackerHostedService`, `AddDTZeroEventScopeInitializer`, diagnostics NF0401-NF0404, log events 9001-9009. Consumers using `[Event]` for fire-and-forget work migrate to manual `Task.Run` + `IServiceScopeFactory.CreateScope()`. `[FactoryEventHandler<T>]`, `IFactoryEvents`, `IFactoryEventRelay`, and `ICorrelationContext` are **unchanged**. |
+| [v1.4.0](v1.4.0.md) | 2026-04-14 | **Breaking**: `IFactoryEventRelay` redesigned — single `Relay(IReadOnlyList<FactoryEventBase>)` hook replaces `Register/Unregister`; instance-method `[FactoryEventHandler<T>]` client path removed (NF0503 Warning). **Feat**: `NoOpFactoryEventRelay` default in Remote mode; `[FactoryEvent]` + `[DynamicallyAccessedMembers]` on `FactoryEventBase` with `Inherited = true` replace per-handler trimming codegen; `UnknownFactoryEventTypeException`. **Fix**: post-return ordering — `Relay` runs strictly after caller's continuation resumes (timing bug). |
+| [v1.3.0](v1.3.0.md) | 2026-04-13 | **Feat**: `CanSave(T target)` overload on `IFactorySave<T>` runs both non-target and target-parameterized auth methods. **Fix**: auth method triplication in generated `LocalCanSave` / `LocalSave` — value equality on `AuthMethodCall` / `AspAuthorizeCall`. |
+| [v1.2.0](v1.2.0.md) | 2026-04-13 | **Fix**: `[FactoryEventHandler<T>]` event records now round-trip correctly in Blazor WASM Release builds. Generator emits `DtoConstructorRegistry.PreserveType<T>()` for every event type plus nested records. New `PreserveType<T>()` primitive; `[DynamicallyAccessedMembers(All)]` added to `Raise<T>` and `RegisterHandler<TEvent>`. |
+| [v1.1.0](v1.1.0.md) | 2026-04-10 | **Breaking**: `[FactoryEventHandler<T>]` runs in the caller's scope, sequentially, awaited — so handlers participate in the factory's DB transaction. `RaiseOptions.AwaitRemote` and `RaiseOptions.ContinueOnFail` removed. `IFactoryEvents.Raise` gains a `CancellationToken`. |
+| [v1.0.0](v1.0.0.md) | 2026-04-10 | **Production release** — factory events (`[FactoryEventHandler<T>]` mediator + server-to-client relay, `RaiseOptions.ServerOnly`), API stability commitment |
+| [v0.29.0](v0.29.0.md) | 2026-04-06 | Authorization target parameter support, type-based param matching tests |
+| [v0.28.0](v0.28.0.md) | 2026-04-03 | `IEventScopeInitializer` for multi-tenant events, pipeline trace logging, fix parameter DTO trimming |
+| [v0.27.0](v0.27.0.md) | 2026-03-31 | Recursive nested DTO discovery for IL trimming |
+| [v0.26.0](v0.26.0.md) | 2026-03-29 | `LazyLoad<T>` inheritable for subclassing |
+| [v0.25.0](v0.25.0.md) | 2026-03-28 | `LazyLoad<T>` for deferred async loading with full serialization support |
+| [v0.24.2](v0.24.2.md) | 2026-03-27 | Fix event DI validation failure on Blazor WASM clients |
+| [v0.24.1](v0.24.1.md) | 2026-03-26 | Fix missing `global::` prefix in generated type references |
+| [v0.24.0](v0.24.0.md) | 2026-03-25 | Trimming-safe DTO serialization via generator-emitted constructor registration |
+| [v0.23.2](v0.23.2.md) | 2026-03-25 | Fix DTO deserialization under IL trimming |
+| [v0.23.0](v0.23.0.md) | 2026-03-21 | Shared reference handling for mutable types, record bypass converter |
+| [v0.22.0](v0.22.0.md) | 2026-03-20 | Serializer responsibility redesign: converter-level reference handling |
+| [v0.21.3](v0.21.3.md) | 2026-03-20 | Fix record deserialization with `$id`/`$ref` metadata |
+| [v0.21.2](v0.21.2.md) | 2026-03-08 | Trimming-safe factory registration for all factory types |
+| [v0.21.1](v0.21.1.md) | 2026-03-08 | Fix factories trimmed when first overload has no callers |
+| [v0.21.0](v0.21.0.md) | 2026-03-08 | [Remote] requires internal (breaking), Can* auth-driven guards, trimming fixes |
+| [v0.20.1](v0.20.1.md) | 2026-03-07 | Fix internal methods excluded from public factory interfaces |
+| [v0.20.0](v0.20.0.md) | 2026-03-07 | Serialization property rename (breaking wire format), internals appendix |
+| [v0.19.0](v0.19.0.md) | 2026-03-07 | Trim-safe ordinal serialization |
+| [v0.18.0](v0.18.0.md) | 2026-03-07 | Auth type trimming fix, IsTrimmable on domain assemblies |
+| [v0.17.0](v0.17.0.md) | 2026-03-06 | Internal factory visibility, IL trimming, drop .NET 8 |
+| [v0.16.1](v0.16.1.md) | 2026-03-02 | Fix net10.0 forced to v9 Microsoft.Extensions packages |
+| [v0.16.0](v0.16.0.md) | 2026-02-28 | Hosted Blazor WebAssembly, PersonApp renamed to Person.Client |
+| [v0.15.0](v0.15.0.md) | 2026-02-26 | Version reset from v10.x to v0.x pre-release |
+| [v0.14.0](v0.14.0.md) | 2026-02-26 | CanSave on IFactorySave\<T\> |
+| [v0.13.0](v0.13.0.md) | 2026-02-18 | [Execute] on class factories |
+| [v0.12.0](v0.12.0.md) | 2026-02-01 | CorrelationContext DI redesign, event correlation propagation fix |
+| [v0.11.2](v0.11.2.md) | 2026-01-18 | Fix nullable value type syntax in ordinal serialization |
+| [v0.11.1](v0.11.1.md) | 2026-01-18 | Fix nullable typeof() in ordinal serialization |
+| [v0.11.0](v0.11.0.md) | 2026-01-15 | Generator refactoring, exception stack trace fix |
+| [v0.10.0](v0.10.0.md) | 2026-01-15 | Support for `params` parameters in factory methods |
+| [v0.9.0](v0.9.0.md) | 2026-01-13 | Client-server code separation with FactoryMode.RemoteOnly |
+| [v0.8.0](v0.8.0.md) | 2026-01-13 | Optional CancellationToken on all factory methods |
+| [v0.7.0](v0.7.0.md) | 2026-01-11 | Fix duplicate Save method generation with multi-line parameters |
+| [v0.6.0](v0.6.0.md) | 2026-01-07 | Fire-and-forget domain events with [Event] attribute |
+| [v0.5.0](v0.5.0.md) | 2026-01-04 | Constructor injection compatibility, IL trimming documentation |
+| [v0.4.0](v0.4.0.md) | 2026-01-04 | CancellationToken support with IFactoryOnCancelled lifecycle hooks |
+| [v0.3.0](v0.3.0.md) | 2026-01-03 | Comprehensive logging with CorrelationId for distributed tracing |
+| [v0.2.0](v0.2.0.md) | 2026-01-01 | Ordinal serialization (40-50% smaller payloads), breaking: default format changed |
+
+## All Releases
+
+- [v2.0.0](v2.0.0.md) - 2026-11-11 - **Breaking**: the first release under the DTZero name.
+- [v1.10.9](v1.10.9.md) - 2026-10-16 - **Fix**: an interface-factory or static `[Execute]` authorization refusal reaches the client over HTTP as `NotAuthorizedException`, not a 500 (#10). Update client and server. No breaking changes.
+- [v1.10.8](v1.10.8.md) - 2026-10-16 - **Fix**: a client disconnect mid-call is no longer recorded as HTTP 500 at Error (#15); it ends with 499, and a shutdown answers 503. No breaking changes.
+- [v1.10.7](v1.10.7.md) - 2026-10-16 - **Security fix**: static-factory `[AuthorizeFactory<T>]` is now enforced; **Fix**: the Ordinal format keeps shared and back references (#22); **Fix**: trimmed-client Save no longer becomes Insert; relay batch per call; `HttpRequestException.StatusCode`. Deploy client and server together. No breaking changes.
+- [v1.10.6](v1.10.6.md) - 2026-10-13 - **Security fix**: `[AspAuthorize]` on a class-factory operation let a caller who was not signed in through; now refused. No breaking changes.
+- [v1.10.5](v1.10.5.md) - 2026-10-13 - **Fix**: calling `AddDTZero` twice (Neatoo + `AddDTZeroAspNetCore`) broke remote Save (#16); **Fix**: `[AspAuthorize]` on a static `[Execute]` is now enforced (#5). No breaking changes.
+- [v1.10.4](v1.10.4.md) - 2026-10-12 - **Fix**: an interface-factory method returning `Task` generated `Task<Task>` (CS0738/CS0266, no diagnostic); it now generates a `Task` method and round-trips with no result. No breaking changes.
+- [v1.10.3](v1.10.3.md) - 2026-10-12 - **Fix**: a `partial` `[Factory]` `List<T>` class lost its items in Ordinal format (the generator wrote `Capacity`); collections now serialize as arrays of their items in both formats. No breaking changes.
+- [v1.10.2](v1.10.2.md) - 2026-10-10 - **Fix**: a static `[Execute]` returning `Task` generated a `Task<Task>` delegate that failed CS0266 in generated code, with no diagnostic; it now generates a `Task` delegate and round-trips with no result. Skill and Design corrected from "must return `Task<T>`". One default member added in `DTZero.Internal`. No breaking changes.
+- [v1.10.1](v1.10.1.md) - 2026-10-09 - **Fix**: dictionary keys and values and public-field types are now preserved on publish-trimmed clients; before, a DTO reachable only that way was trimmed and failed to deserialize. Exposed by v1.7.0, which stopped async `[Remote]` bodies rooting such types by accident. Nested collections and consumer generic collections are walked too. No API change.
+- [v1.10.0](v1.10.0.md) - 2026-10-09 - **Fix**: `NotAuthorizedException` no longer carries an empty `Message` — a bare `false` from an auth method produced one, and empty-message exceptions are dropped by telemetry pipelines (a consumer lost 4 error records a night for ~4 months). Denials now name the operation and type, and the auth method on interface factories; auth-supplied messages stay verbatim. Updating the package stops the drop, rebuilding adds the detail. **Feat**: `NotAuthorizedException.Context` / `.Authorized` properties and a `(Authorized, string?)` constructor — additive API, hence a minor bump.
+- [v1.9.0](v1.9.0.md) - 2026-09-08 - **Breaking (behaviour)**: `[Execute]` obeys `[Remote]` — a bare `[Execute]` runs where it is resolved, with that tier's services, and ships to a trimmed WASM client; `[Remote, Execute]` unchanged. Add `[Remote]` to any bare `[Execute]` needing a server-only `[Service]`; `internal static` on a class factory and anything authorization already forces remote are unaffected. **Breaking (signature)**: class-level `[Execute]` under authorization now returns `Task<T?>`. **Fix**: that shape declared `Task<T>` while returning `Authorized<T>.Result` — CS8603 under `TreatWarningsAsErrors`, and null through a non-null signature without it. Trimming gate measures three absent/present pairs. Upgrade both tiers together.
+- [v1.8.1](v1.8.1.md) - 2026-09-01 - **Fix**: client-initiated `IFactoryEvents.Raise` never relayed its response batch — `ForDelegateEvent` discarded the `RemoteResponseDto`, so events raised by its server handlers were silently dropped. Relay dispatch shared across both call paths. **Behaviour note**: relays now receive batches on this path, including the caller's own event (`ServerOnly` opts out); the contract reads "once per remote round-trip". Client-side `Raise` documented as supported. **Fix (v1.8.0 regression)**: `[FactoryEventHandler<T>]` with a `[Service]` parameter of a generated factory interface emitted `global::IPlanFactory` → CS0400; now emitted as written.
+- [v1.8.0](v1.8.0.md) - 2026-08-31 - **Feat**: dispatch phases for `[FactoryEventHandler<T>]` — `Immediate` (default, unchanged), `AfterFlush` (in-transaction, consumer-drained via `IFactoryEventPhaseCoordinator`, fail-open with a 9007 warning), `AfterCommit` (framework-drained at entry-call completion, no ambient transaction, handler exceptions swallowed, never run if the call failed). Cross-phase ordering guaranteed per drain point. Opt-in same-event coalescing (`Coalesce = true`). New Warnings **NF0504** and **NF0505**. **Fix**: generated code bound to the wrong type under a shadowing consumer namespace; split-partial attributes crashed the generator (CS8785, losing every factory in the assembly); return types bound wrong under shadowing. **Behaviour note**: log ids 9001–9009 reassigned to phased dispatch after v1.5.0 freed them. No breaking changes.
+- [v1.7.0](v1.7.0.md) - 2026-08-14 - **Fix**: `[Remote]` bodies stripped from trimmed clients for `[Execute]` static factories, `[FactoryEventHandler<T>]` classes, and class factories with `async` operations (generated single-method registrar holders + non-async guard wrapper). **Feat**: positional-record DTOs, entity-property DTOs, and subscribe-only event records now preserved under IL trimming. **Perf**: relay-handler incremental caching. **Behaviour change**: server-only guard throws synchronously instead of returning a faulted `Task`. Interface-factory body removal remains **unestablished** and is not claimed.
+- [v1.6.1](v1.6.1.md) - 2026-05-24 - **Fix**: `[Execute]`-only `[Factory]` classes with DI-requiring ctors are now auto-registered as transients so client-side deserialization can invoke the ctor via DI (was missing in `FactoryServiceRegistrar`).
+- [v1.6.0](v1.6.0.md) - 2026-04-25 - **Feat**: NF0106 generator diagnostic for factory-operation attributes on interface factory methods (replaces cryptic CS0111/CS0738 duplicate-codegen errors). Interface-factory `[AuthorizeFactory<T>]` pedagogy added to Design project (`AuthorizedRepository.cs`, 10 tests) and skill (snippet-backed section).
+- [v1.5.0](v1.5.0.md) - 2026-04-14 - **Breaking**: `[Event]` method attribute API fully deleted (attribute, `FactoryOperation.Event`, `AuthorizeFactoryOperation.Event`, `IEventTracker`, `IEventScopeInitializer`, `EventTrackerHostedService`, `AddDTZeroEventScopeInitializer`, NF0401-NF0404, log events 9001-9009). Migrate fire-and-forget to manual `Task.Run` + `IServiceScopeFactory.CreateScope()`. `[FactoryEventHandler<T>]` / `IFactoryEvents` / `IFactoryEventRelay` / `ICorrelationContext` unchanged.
+- [v1.4.0](v1.4.0.md) - 2026-04-14 - **Breaking**: `IFactoryEventRelay` surface redesigned — `Relay(IReadOnlyList<FactoryEventBase>)` replaces `Register/Unregister`; instance-method `[FactoryEventHandler<T>]` no longer generated (NF0503 Warning). `NoOpFactoryEventRelay` default in Remote mode; `[FactoryEvent]` + trimming preservation on `FactoryEventBase` with `Inherited = true`. **Fix**: post-return ordering guarantee for relay dispatch.
+- [v1.3.0](v1.3.0.md) - 2026-04-13 - **Feat**: `IFactorySave<T>.CanSave(T target)` overload runs target-aware authorization. **Fix**: auth method triplication in generated `LocalCanSave` / `LocalSave` (value equality on `AuthMethodCall` / `AspAuthorizeCall`).
+- [v1.2.0](v1.2.0.md) - 2026-04-13 - **Fix**: Event records preserved from IL trimming in Blazor WASM Release builds; new `DtoConstructorRegistry.PreserveType<T>()` primitive; call-site `[DynamicallyAccessedMembers]` on `Raise<T>` and `RegisterHandler<TEvent>`.
+- [v1.1.0](v1.1.0.md) - 2026-04-10 - **Breaking**: `[FactoryEventHandler<T>]` shares the caller's DI scope — handlers participate in the factory's DB transaction. `AwaitRemote`/`ContinueOnFail` removed; `Raise` gains `CancellationToken`.
+- [v1.0.0](v1.0.0.md) - 2026-04-10 - **Production release** — factory events mediator + client relay, API stability commitment
+- [v0.29.0](v0.29.0.md) - 2026-04-06 - Authorization target parameter support
+- [v0.28.0](v0.28.0.md) - 2026-04-03 - IEventScopeInitializer, pipeline trace logging, fix parameter DTO trimming
+- [v0.27.0](v0.27.0.md) - 2026-03-31 - Recursive nested DTO discovery for IL trimming
+- [v0.26.0](v0.26.0.md) - 2026-03-29 - LazyLoad&lt;T&gt; inheritable for subclassing
+- [v0.25.0](v0.25.0.md) - 2026-03-28 - LazyLoad&lt;T&gt; for deferred async loading
+- [v0.24.2](v0.24.2.md) - 2026-03-27 - Fix event DI validation on Blazor WASM
+- [v0.24.1](v0.24.1.md) - 2026-03-26 - Fix missing global:: in generated type references
+- [v0.24.0](v0.24.0.md) - 2026-03-25 - Trimming-safe DTO serialization
+- [v0.23.2](v0.23.2.md) - 2026-03-25 - Fix DTO deserialization under IL trimming
+- [v0.23.0](v0.23.0.md) - 2026-03-21 - Shared reference handling for mutable types
+- [v0.22.0](v0.22.0.md) - 2026-03-20 - Serializer responsibility redesign
+- [v0.21.3](v0.21.3.md) - 2026-03-20 - Fix record deserialization with reference metadata
+- [v0.21.2](v0.21.2.md) - 2026-03-08 - Trimming-safe factory registration for all factory types
+- [v0.21.1](v0.21.1.md) - 2026-03-08 - Fix [DynamicDependency] trimming on multi-overload factories
+- [v0.21.0](v0.21.0.md) - 2026-03-08 - [Remote] requires internal, trimming fixes
+- [v0.20.1](v0.20.1.md) - 2026-03-07 - Fix internal methods on public factory interfaces
+- [v0.20.0](v0.20.0.md) - 2026-03-07 - Serialization property rename & internals appendix
+- [v0.19.0](v0.19.0.md) - 2026-03-07 - Trim-safe ordinal serialization
+- [v0.18.0](v0.18.0.md) - 2026-03-07 - Auth type trimming fix, IsTrimmable
+- [v0.17.0](v0.17.0.md) - 2026-03-06 - Internal factory visibility & IL trimming
+- [v0.16.1](v0.16.1.md) - 2026-03-02 - Fix net10.0 package versions
+- [v0.16.0](v0.16.0.md) - 2026-02-28 - Hosted Blazor WebAssembly
+- [v0.15.0](v0.15.0.md) - 2026-02-26 - Version reset from v10.x to v0.x
+- [v0.14.0](v0.14.0.md) - 2026-02-26 - CanSave on IFactorySave\<T\>
+- [v0.13.0](v0.13.0.md) - 2026-02-18 - [Execute] on class factories
+- [v0.12.0](v0.12.0.md) - 2026-02-01 - CorrelationContext DI redesign
+- [v0.11.2](v0.11.2.md) - 2026-01-18 - Nullable value type syntax fix
+- [v0.11.1](v0.11.1.md) - 2026-01-18 - Nullable typeof() fix
+- [v0.11.0](v0.11.0.md) - 2026-01-15 - Generator refactoring
+- [v0.10.0](v0.10.0.md) - 2026-01-15 - Support for params parameters
+- [v0.9.0](v0.9.0.md) - 2026-01-13 - Client-server code separation
+- [v0.8.0](v0.8.0.md) - 2026-01-13 - Optional CancellationToken on factory methods
+- [v0.7.0](v0.7.0.md) - 2026-01-11 - Parameter whitespace bug fix
+- [v0.6.0](v0.6.0.md) - 2026-01-07 - Fire-and-forget domain events
+- [v0.5.0](v0.5.0.md) - 2026-01-04 - Constructor injection compatibility
+- [v0.4.0](v0.4.0.md) - 2026-01-04 - CancellationToken support
+- [v0.3.0](v0.3.0.md) - 2026-01-03 - Logging with CorrelationId
+- [v0.2.0](v0.2.0.md) - 2026-01-01 - Ordinal serialization
+- [v0.1.1](v0.1.1.md) - 2026-01-01 - Version metadata fix
+
+---
+
+## Release Notes Template
+
+When creating release notes for a new version:
+
+### 1. Create the release file
+
+Create `docs/release-notes/vX.Y.Z.md`:
+
+```markdown
+---
+layout: default
+title: "vX.Y.Z"
+description: "Release notes for DTZero vX.Y.Z"
+parent: Release Notes
+nav_order: N  # Newest = 1; increment the 1.x pages behind it (the v0.x tail is frozen — many share a number)
+---
+
+# vX.Y.Z - Short Title
+
+**Release Date:** YYYY-MM-DD
+**NuGet:** [DTZero X.Y.Z](https://nuget.org/packages/DTZero/X.Y.Z)
+
+## Overview
+
+Brief 1-2 sentence summary of what this release delivers.
+
+## What's New
+
+- Feature additions with examples (or "None")
+
+## Breaking Changes
+
+- Any incompatible changes (or "None")
+
+## Bug Fixes
+
+- Resolved issues (or "None")
+
+## Migration Guide
+
+Step-by-step instructions for upgrading from previous version (if applicable).
+
+## Commits
+
+- `hash` - Commit message
+```
+
+### 2. Update this index
+
+- **Highlights table**: Add if the release has new features, breaking changes, or bug fixes
+- **All Releases list**: Always add (newest at top)

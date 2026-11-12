@@ -1,0 +1,349 @@
+@page "/"
+@* =============================================================================
+   DESIGN SOURCE OF TRUTH: Sample Page
+   =============================================================================
+
+   Demonstrates all three DTZero patterns in a Blazor WASM client:
+   1. Class Factory - Create/Fetch entities
+   2. Interface Factory - Call a domain service (the product catalog)
+   3. Static Factory - Execute commands, fire events
+
+   ========================================================================== *@
+
+@using Design.Domain.Aggregates
+@using Design.Domain.Contexts
+@using Design.Domain.Entities
+@using Design.Domain.FactoryPatterns
+@* begin-snippet: skill-blazor-inject *@
+@inject IOrderFactory OrderFactory
+@inject IOrderLineFactory LineFactory
+@* end-snippet *@
+@inject IExampleClassFactoryFactory ClassFactory
+@inject IProductCatalog Catalog
+@inject IOrderCheckoutFactory CheckoutFactory
+
+<PageTitle>Design Source of Truth</PageTitle>
+
+<h1>DTZero Design Samples</h1>
+<p>This page demonstrates all three factory patterns working through the client/server boundary.</p>
+
+<hr />
+
+@* -------------------------------------------------------------------------
+   PATTERN 1: CLASS FACTORY
+
+   Class factories create and manage entity lifecycle.
+   IOrderFactory and IExampleClassFactoryFactory are generated from [Factory] classes.
+
+   OrderFactory.Create and LineFactory.Create run here, on the client: they are
+   public and not [Remote] (D14, R-C). Fetch and Save cross to the server.
+   -------------------------------------------------------------------------- *@
+<h2>1. Class Factory Pattern</h2>
+<p>Create and fetch entities using generated factory interfaces.</p>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="CreateOrder">Create Order</button>
+    <button class="btn btn-secondary" @onclick="FetchOrder">Fetch Order</button>
+    <button class="btn btn-secondary" @onclick="AddLine" disabled="@(currentOrder == null)">Add Line</button>
+    <button class="btn btn-success" @onclick="SaveOrder" disabled="@(currentOrder == null)">Save Order</button>
+</div>
+
+@if (currentOrder != null)
+{
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">Order #@currentOrder.Id</h5>
+            <p>Customer: @currentOrder.CustomerName</p>
+            <p>Status: @currentOrder.Status</p>
+            <p>Total: @currentOrder.Total.Amount @currentOrder.Total.Currency</p>
+            <p>Lines: @currentOrder.Lines.Count</p>
+            <p>IsNew: @currentOrder.IsNew</p>
+        </div>
+    </div>
+}
+
+<hr />
+
+@* -------------------------------------------------------------------------
+   PATTERN 2: INTERFACE FACTORY
+
+   Interface factories create remote proxies for service interfaces: domain
+   services the client calls. The ProductCatalog implementation runs on the
+   server. A repository is never an interface factory (D12).
+   -------------------------------------------------------------------------- *@
+<h2>2. Interface Factory Pattern</h2>
+<p>Call a domain service through its generated remote proxy.</p>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="SearchProducts">Search Widgets</button>
+    <button class="btn btn-secondary" @onclick="FindProduct">Find WB-200</button>
+</div>
+
+@if (products != null)
+{
+    <ul>
+        @foreach (var product in products)
+        {
+            <li>@product.Sku: @product.Name (@product.UnitPrice)</li>
+        }
+    </ul>
+}
+
+@if (foundProduct != null)
+{
+    <p>Found: @foundProduct.Sku - @foundProduct.Name</p>
+}
+
+<hr />
+
+@* -------------------------------------------------------------------------
+   CONTEXT: CHECKOUT
+
+   A context is a [Factory] instance the screen binds to (D13). It loads the
+   order in one call; Add and Submit act on the held order here, on the
+   client; Save goes through the order's root factory.
+   -------------------------------------------------------------------------- *@
+<h2>Context: Checkout</h2>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="StartCheckout">Start Checkout (Draft Order)</button>
+    <button class="btn btn-secondary" @onclick="AddFoundProduct" disabled="@(checkout == null || foundProduct == null)">Add Found Product</button>
+    <button class="btn btn-secondary" @onclick="SubmitCheckout" disabled="@(checkout == null)">Submit</button>
+    <button class="btn btn-success" @onclick="SaveCheckout" disabled="@(checkout == null)">Save</button>
+</div>
+
+@if (checkout != null)
+{
+    <p>Order #@checkout.Order.Id: @checkout.Order.Status, @checkout.Order.Lines.Count lines, total @checkout.Order.Total.Amount</p>
+}
+
+<hr />
+
+@* -------------------------------------------------------------------------
+   PATTERN 3: STATIC FACTORY
+
+   Static factories generate delegates for request-response commands.
+   [Execute] = request-response; [Remote] decides where it runs. SendNotification
+   crosses to the server; a bare [Execute] such as ScoreText runs here, in the
+   browser, with this container's services.
+   -------------------------------------------------------------------------- *@
+<h2>3. Static Factory Pattern</h2>
+<p>Execute commands using generated delegates.</p>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="ExecuteCommand">Execute: Send Notification</button>
+</div>
+
+@if (commandResult.HasValue)
+{
+    <p>Command result: @(commandResult.Value ? "Success" : "Failed")</p>
+}
+
+<hr />
+
+<h2>Messages</h2>
+<pre>@messages</pre>
+
+@code {
+    // -------------------------------------------------------------------------
+    // State
+    // -------------------------------------------------------------------------
+    private IOrder? currentOrder;
+    private IReadOnlyList<ProductListing>? products;
+    private ProductListing? foundProduct;
+    private IOrderCheckout? checkout;
+    private bool? commandResult;
+    private string messages = "";
+
+    // -------------------------------------------------------------------------
+    // DESIGN DECISION: Inject factory interfaces, not concrete types
+    //
+    // The DI container provides:
+    // - IOrderFactory (generated from [Factory] on Order class)
+    // - IExampleClassFactoryFactory (generated from [Factory] on ExampleClassFactory)
+    // - IProductCatalog (interface factory - proxy to the server's domain service)
+    //
+    // Static factory delegates are also injected:
+    // - ExampleCommands.SendNotification
+    // -------------------------------------------------------------------------
+
+    #region skill-command-inject
+    [Inject]
+    private ExampleCommands.SendNotification SendNotification { get; set; } = default!;
+    #endregion
+
+    // -------------------------------------------------------------------------
+    // Pattern 1: Class Factory - Create/Fetch
+    // -------------------------------------------------------------------------
+
+    #region skill-blazor-usage
+    private void CreateOrder()
+    {
+        try
+        {
+            messages += "Creating order (local, no server call)...\n";
+            currentOrder = OrderFactory.Create("Demo Customer");
+            messages += $"Created order: IsNew={currentOrder.IsNew}, Status={currentOrder.Status}\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+
+    private async Task FetchOrder()
+    {
+        try
+        {
+            messages += $"Fetching order #{InMemoryOrderDbContext.DraftOrderId}...\n";
+            currentOrder = await OrderFactory.Fetch(InMemoryOrderDbContext.DraftOrderId);
+            messages += currentOrder == null
+                ? "Order not found\n"
+                : $"Fetched order: Id={currentOrder.Id}, Lines={currentOrder.Lines.Count}\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+
+    private void AddLine()
+    {
+        try
+        {
+            // The client builds the line with the line factory, then hands it to the order
+            currentOrder!.AddLine(LineFactory.Create("Demo Widget", 12.50m, 1));
+            messages += $"Added line: Lines={currentOrder.Lines.Count}\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+
+    private async Task SaveOrder()
+    {
+        try
+        {
+            // Save returns a new instance from the server: reassign it
+            currentOrder = await OrderFactory.Save(currentOrder!);
+            messages += $"Saved order: Id={currentOrder?.Id}, Lines={currentOrder?.Lines.Count}\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+    #endregion
+
+    // -------------------------------------------------------------------------
+    // Pattern 2: Interface Factory - domain service calls
+    // -------------------------------------------------------------------------
+
+    private async Task SearchProducts()
+    {
+        try
+        {
+            messages += "Calling catalog.SearchAsync(\"Widget\")...\n";
+            products = await Catalog.SearchAsync("Widget");
+            messages += $"Found {products.Count} products\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+
+    private async Task FindProduct()
+    {
+        try
+        {
+            messages += "Calling catalog.FindBySkuAsync(\"WB-200\")...\n";
+            foundProduct = await Catalog.FindBySkuAsync("WB-200");
+            messages += $"Found: {foundProduct?.Name ?? "null"}\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Context: Checkout
+    // -------------------------------------------------------------------------
+
+    #region skill-context-usage
+    private async Task StartCheckout()
+    {
+        try
+        {
+            checkout = await CheckoutFactory.Fetch(InMemoryOrderDbContext.DraftOrderId);
+            messages += checkout == null ? "Order not found\n" : $"Checkout started for order #{checkout.Order.Id}\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+
+    private void AddFoundProduct()
+    {
+        try
+        {
+            checkout!.AddProduct(foundProduct!, 1);  // no server call
+            messages += $"Added {foundProduct!.Name}\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+
+    private void SubmitCheckout()
+    {
+        try
+        {
+            checkout!.Submit();  // no server call
+            messages += "Submitted (not yet saved)\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+
+    private async Task SaveCheckout()
+    {
+        try
+        {
+            await checkout!.SaveAsync();  // the order's root Save
+            messages += $"Saved order #{checkout.Order.Id}\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+    #endregion
+
+    // -------------------------------------------------------------------------
+    // Pattern 3: Static Factory - Commands
+    // -------------------------------------------------------------------------
+
+    #region skill-command-call
+    private async Task ExecuteCommand()
+    {
+        try
+        {
+            messages += "Executing SendNotification command...\n";
+            commandResult = await SendNotification("demo@example.com", "Hello from Blazor!");
+            messages += $"Command returned: {commandResult}\n";
+        }
+        catch (Exception ex)
+        {
+            messages += $"Error: {ex.Message}\n";
+        }
+    }
+    #endregion
+
+}

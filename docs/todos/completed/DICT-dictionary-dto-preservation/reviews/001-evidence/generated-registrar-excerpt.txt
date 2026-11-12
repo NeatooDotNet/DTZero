@@ -1,0 +1,4 @@
+121:        public static void FactoryServiceRegistrar(IServiceCollection services, DTZeroFactory remoteLocal)
+127:            DtoConstructorRegistry.Register<global::DTZeroTests.TrimmingTests.TrimFieldHost>(() => new global::DTZeroTests.TrimmingTests.TrimFieldHost());
+138:        internal static void FactoryServiceRegistrar(IServiceCollection services, DTZeroFactory remoteLocal)
+140:            global::DTZeroTests.TrimmingTests.TrimDictCarrierFactory.FactoryServiceRegistrar(services, remoteLocal);

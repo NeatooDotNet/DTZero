@@ -1,0 +1,9 @@
+<linker>
+  <assembly fullname="DTZero">
+    <type fullname="DTZero.Authorized" preserve="all" />
+    <type fullname="DTZero.Authorized`1" preserve="all" />
+    <type fullname="DTZero.Internal.ObjectJson" preserve="all" />
+    <type fullname="DTZero.RemoteResponseDto" preserve="all" />
+    <type fullname="DTZero.RemoteRequestDto" preserve="all" />
+  </assembly>
+</linker>

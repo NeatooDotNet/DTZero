@@ -1,0 +1,134 @@
+# Appendix: Serialization Internals
+
+This appendix explains **why** DTZero manages its own serialization and **how** the type resolution pipeline works under the hood. For user-facing serialization documentation (formats, configuration, debugging), see [Serialization](../serialization.md).
+
+## The Three Problems System.Text.Json Can't Solve
+
+DTZero's custom serialization exists because System.Text.Json makes three assumptions that break in a 3-tier DDD application:
+
+### 1. Interface-Typed Properties Lose Their Concrete Type
+
+When System.Text.Json encounters an interface-typed property, it has no way to round-trip it. Design's `IOrder` declares `IOrderLineList Lines { get; set; }`, and an `IContactInfo PrimaryContact` property is the same shape.
+
+On **serialization**, STJ serializes only the properties declared on the interface, silently dropping any that exist only on the concrete type (`EmailContact`, `PhoneContact`). On **deserialization**, STJ fails entirely — it can't construct an interface.
+
+STJ's built-in solution (`[JsonPolymorphic]` + `[JsonDerivedType]`) requires you to annotate every interface with every possible concrete type at compile time. In a DDD application where the domain model defines the interfaces and concrete types evolve independently, this is impractical.
+
+DTZero solves this by wrapping interface-typed values with a `$type` discriminator:
+
+```json
+{
+  "$type": "MyApp.Domain.EmailContact",
+  "$value": { "Email": "alice@example.com" }
+}
+```
+
+The concrete type's `FullName` (namespace-qualified, **not** assembly-qualified) is embedded in the JSON, and the receiving side resolves it back to a `Type` object. This works transparently for interface properties, abstract base classes, and polymorphic collections (`List<IContactInfo>` containing mixed concrete types).
+
+### 2. Deserialized Objects Need DI Services
+
+System.Text.Json creates instances using `Activator.CreateInstance()` — a bare constructor call with no DI awareness. In a DDD application, domain objects have constructor-injected services. Design's `CtorInjectedEntity`:
+
+<!-- snippet: service-injection-constructor -->
+<a id='snippet-service-injection-constructor'></a>
+```cs
+public CtorInjectedEntity(ITenantTokenService tokens)
+{
+    _tokens = tokens;
+}
+
+// Read on whichever tier holds the instance: the client's service after the round trip
+public string TokenFromContext => _tokens.Token;
+```
+<sup><a href='/src/Design/Design.Domain/FactoryPatterns/CtorInjectionExample.cs#L130-L138' title='Snippet source file'>snippet source</a> | <a href='#snippet-service-injection-constructor' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+STJ binds a parameterized constructor from the JSON's properties, and the JSON carries no `tokens` to bind: the service is never supplied, and the domain object is broken.
+
+DTZero's deserialization resolves instances from the DI container (`ServiceProvider.GetRequiredService()`), so constructor-injected services are wired up on deserialization exactly as they would be on creation.
+
+### 3. Shared Object Identity Is Lost
+
+When two properties reference the same object instance (common in aggregate root / child entity relationships), STJ duplicates it -- creating two independent copies. DTZero sets `DTZeroPreserveReferenceHandler` on `JsonSerializerOptions` so the serializer writes `$id` / `$ref` pointers, maintaining the object graph structure across the wire.
+
+This applies to mutable reference types like `Dictionary`, `List`, and plain classes with default constructors, to `[Factory]` classes with a parameterless constructor in both formats (in the Ordinal format their generated converter writes the `$id` / `$ref`), and to a framework's types whose converters track references themselves (Neatoo's do). A `[Factory]` class whose constructor takes services has no parameterless constructor, so it takes the record path and is not tracked in either format. Types with parameterized constructors (records, immutable types) are intentionally excluded from reference tracking -- they are DDD value objects where duplication on round-trip is semantically correct. See [Appendix: Record Reference Handling](record-reference-handling.md) for the rationale.
+
+## Type Resolution Pipeline
+
+The critical question in DTZero's serialization is: **given a type name string from the JSON, how do you get back a `Type` object?**
+
+### Why `Type.FullName`, Not `AssemblyQualifiedName`
+
+DTZero uses `Type.FullName` (e.g., `MyApp.Domain.Employee`) — **not** `Type.AssemblyQualifiedName` (e.g., `MyApp.Domain.Employee, MyApp.Domain, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null`).
+
+This is a deliberate design decision for the 3-tier scenario. In a Blazor WASM application:
+
+- The **client** loads assemblies in the browser's WebAssembly runtime
+- The **server** loads the same assemblies in the ASP.NET Core process
+
+Both sides reference the same domain assembly (`MyApp.Domain.dll`), but the runtime environments are completely different. Using assembly-qualified names would couple serialization to a specific assembly version and loading context, breaking the client-server round-trip if anything differs between the two environments.
+
+`Type.FullName` is assembly-agnostic — it identifies a type by namespace and class name only. As long as both sides have a type with the same namespace and class name (which they do, since they reference the same domain project), the lookup succeeds.
+
+### The `ServiceAssemblies` Type Cache
+
+Type resolution is handled by `ServiceAssemblies` (`src/DTZero/Internal/ServiceAssemblies.cs`), which maintains a dictionary mapping `Type.FullName` strings to `Type` objects.
+
+**Registration** — During DI setup, the application passes its domain assemblies to `AddDTZero()`. Design's client:
+
+<!-- snippet: getting-started-client-program -->
+<a id='snippet-getting-started-client-program'></a>
+```cs
+// The factory proxies: calls marked [Remote] go to the server
+builder.Services.AddDTZero(DTZeroFactory.Remote, typeof(IOrder).Assembly);
+
+// The HttpClient DTZero sends them with: the server that hosts this client
+builder.Services.AddKeyedScoped(
+    DTZeroServices.HttpClientKey,
+    (sp, key) => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
+```
+<sup><a href='/src/Design/Design.Client.Blazor/Program.cs#L65-L73' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-client-program' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+`ServiceAssemblies` iterates every type in those assemblies and indexes them by `FullName`:
+
+```
+"MyApp.Domain.Employee"       → typeof(Employee)
+"MyApp.Domain.EmailContact"   → typeof(EmailContact)
+"MyApp.Domain.PhoneContact"   → typeof(PhoneContact)
+...
+```
+
+**Resolution** — When deserializing, the type name from the JSON is looked up in this cache. The lookup is a direct dictionary hit — no assembly scanning, no `Type.GetType()` reflection, no runtime assembly loading.
+
+### Where Type Names Are Written and Read
+
+Three serialization paths embed type names in the JSON:
+
+| Path | Writes | Reads | Purpose |
+|------|--------|-------|---------|
+| `DTZeroJsonSerializer.ToRemoteDelegateRequest()` | `delegateType.FullName` into `RemoteRequestDto.DelegateFullName` | `ServiceAssemblies.FindType()` | Identifies which factory delegate to invoke on the server |
+| `DTZeroJsonSerializer.ToObjectJson()` | `targetType.FullName` into `ObjectJson.TypeFullName` | `ServiceAssemblies.FindType()` | Carries the concrete type of serialized parameters |
+| `DTZeroInterfaceJsonTypeConverter<T>.Write()` | `value.GetType().FullName` into `$type` JSON property | `ServiceAssemblies.FindType()` | Carries the concrete type of interface-typed properties |
+
+All three use the same resolution mechanism — the `ServiceAssemblies` type cache keyed by `FullName`.
+
+### How Interface Serialization Works
+
+When System.Text.Json encounters an interface-typed property during serialization, DTZero's converter pipeline intercepts it:
+
+1. **`DTZeroInterfaceJsonConverterFactory.CanConvert()`** — Checks if the type is an interface (or abstract class) and exists in the registered assemblies. If so, it claims the type.
+
+2. **`DTZeroInterfaceJsonTypeConverter<T>.Write()`** — Wraps the value with `$type` (the concrete type's `FullName`) and `$value` (the serialized concrete object). The concrete object is serialized using its actual type, so all properties are included — not just the interface's declared properties.
+
+3. **`DTZeroInterfaceJsonTypeConverter<T>.Read()`** — Reads the `$type` string, resolves it through `ServiceAssemblies.FindType()` to get the concrete `Type`, then delegates to `JsonSerializer.Deserialize()` with that concrete type.
+
+This applies equally to single properties and collection elements. A `List<IContactInfo>` serializes as an array where each element is wrapped with its own `$type`/`$value`, allowing mixed concrete types in the same collection.
+
+### The Delegate Type: Routing, Not Serialization
+
+The `DelegateFullName` field in `RemoteRequestDto` serves a different purpose from `$type` — it's a **routing key**, not a serialization discriminator.
+
+When the client calls a `[Remote]` factory method, the generated code sends a request containing the delegate type's `FullName`. The server resolves that name to the delegate type with `ServiceAssemblies.FindType`, then resolves the delegate itself from the request's DI scope and invokes it.
+
+The delegate type identifies *which operation to run*. The `ObjectJson` parameters identify *what data to pass*. Both use `FullName` for type identification, but they serve fundamentally different roles.

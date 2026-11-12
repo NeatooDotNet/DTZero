@@ -1,0 +1,427 @@
+#!/usr/bin/env bash
+#
+# Trimming absence gate. Asserts that server-only code is gone from a
+# publish-trimmed client assembly, per factory shape.
+#
+# Usage:  verify-trimmed.sh <path-to-DTZero.TrimmingTests.dll>
+#
+# WHY THIS IS A SCRIPT AND NOT SHELL-IN-YAML
+#
+# String absence is only observable from outside the harness process, so this
+# check has to live in CI. But a gate that only ever runs in CI is a gate nobody
+# can prove works. Every previous version of this check was written straight into
+# build.yml and never executed against a known-bad artifact — which is how it came
+# to carry an exemption justified by a diagnosis this repo later disproved, and how
+# `grep -aq` on a missing path came to print success. As a script it can be run
+# against an archived pre-fix DLL and observed FAILING before it is trusted.
+#
+# TWO ENCODINGS, OR THE CHECK CANNOT FAIL
+#
+# .NET metadata names (types, methods, parameters) are UTF-8 in the #Strings heap.
+# String literals from method bodies are UTF-16LE in the #US heap. A plain
+# `grep -a "SomeLiteral_MARKER"` searches raw bytes and therefore NEVER matches a
+# UTF-16 literal — it reports "absent" for something sitting right there, and an
+# absence gate built on it passes unconditionally.
+#
+# `tr -d '\000'` collapses UTF-16LE ASCII text down to plain ASCII, giving a second
+# view to search. Metadata names contain no NULs, so they survive that view intact
+# and both kinds of marker are reachable. This was not a hypothetical: the probe
+# used to produce this gate's expectations had exactly this bug, and reported five
+# literal markers absent from an assembly that provably contained them.
+
+set -euo pipefail
+
+DLL="${1:-}"
+if [ -z "$DLL" ]; then
+    echo "usage: $0 <path-to-DTZero.TrimmingTests.dll>" >&2
+    exit 2
+fi
+
+if [ ! -f "$DLL" ]; then
+    echo "::error::Trimmed assembly not found at '$DLL'. The gate read nothing, so it proved nothing."
+    exit 1
+fi
+
+NONUL="$(mktemp)"
+trap 'rm -f "$NONUL"' EXIT
+tr -d '\000' < "$DLL" > "$NONUL"
+
+# Searches both the raw bytes (UTF-8 metadata names) and the NUL-stripped view
+# (UTF-16 string literals).
+present() {
+    grep -aqF -- "$1" "$DLL" || grep -aqF -- "$1" "$NONUL"
+}
+
+failures=0
+
+fail() {
+    echo "::error::$1"
+    failures=$((failures + 1))
+}
+
+# ---------------------------------------------------------------------------
+# POSITIVE CONTROLS — must be PRESENT.
+#
+# Without these the gate is unfalsifiable: every absence check below passes
+# trivially against a truncated, wrong, or unreadable file. The named-type controls are
+# UTF-8-only and the message control is UTF-16-only, so a failure in EITHER extraction path
+# is caught rather than silently turning that half of the gate into a no-op.
+# ---------------------------------------------------------------------------
+echo "-- positive controls"
+# Named in full, not by prefix. `DTZeroEventHandlerRegistrar_` alone is satisfied by the sync
+# handler class, so the async handler class could stop generating entirely — taking its markers
+# absent for the wrong reason — while the gate stayed green.
+#
+# DTZeroClassFactoryRegistrar_TrimDictCarrier (DICT-001) is the registrar the entity walk emits
+# the dictionary-value and public-field preservations into. The harness's own checks catch a
+# dead registrar once the walk covers those shapes; this control says the holder was emitted at
+# all. It is a control, not a discriminator: it is present before and after DICT-002.
+for control in \
+    "DTZeroFactoryRegistrar_TrimTestCommands" \
+    "DTZeroEventHandlerRegistrar_TrimRelayHandlers" \
+    "DTZeroEventHandlerRegistrar_TrimAsyncRelayHandlers" \
+    "TrimTestCommands" \
+    "ITrimIfaceQueryFactory" \
+    "ITrimAsyncIfaceQueryFactory" \
+    "ITrimSaveTargetFactory" \
+    "DTZeroClassFactoryRegistrar_TrimTestEntity" \
+    "DTZeroClassFactoryRegistrar_TrimSaveTarget" \
+    "DTZeroClassFactoryRegistrar_TrimExecTarget" \
+    "DTZeroClassFactoryRegistrar_TrimDictCarrier"
+do
+    if present "$control"; then
+        echo "   ok      $control"
+    else
+        fail "Positive control '$control' is MISSING from the trimmed assembly. Either registration was silently removed, or this gate is not reading a real trimmed artifact — do not trust the absence results below."
+    fi
+done
+
+# UTF-16-only control. Proves the NUL-stripped view was built and searched; if
+# this is the sole failure, every literal-marker check below is a no-op.
+if present "Trimming verification app completed"; then
+    echo "   ok      <utf16 extraction>"
+else
+    fail "UTF-16 positive control missing. The NUL-stripped view is not working, so every string-literal absence check in this gate is vacuous."
+fi
+
+# STOP HERE if any control failed. Printing "do not trust the results below" and then
+# printing them anyway is not good enough: the assert-PRESENT blocks emit the most
+# action-directing text in this gate ("the async diagnosis is wrong and must be reopened"),
+# and a reader scanning ::error:: lines will act on it. Running against an artifact that
+# predates those targets produced eight such instructions — advice to reopen a diagnosis,
+# generated by a DLL where the target simply did not exist yet.
+if [ "$failures" -gt 0 ]; then
+    echo "::error::$failures positive control(s) failed. This artifact is not a trustworthy trimmed build of the current harness — absence and presence results are NOT being reported, because they would be meaningless and their remediation advice actively misleading."
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# ABSENCE CHECKS — per leg, so a failure names the culprit.
+#
+# NOT every marker here is a fix-discriminator. Mixing the two and calling them all
+# "measured present before the fix, absent after" is the claim-beyond-evidence this
+# arc keeps repeating, so the two kinds are labelled:
+#
+#   [D] discriminator  — measured PRESENT pre-fix and ABSENT post-fix. Going red means
+#                        the fix regressed.
+#   [R] no-regression  — absent both before and after. Going red means something NEW
+#                        started leaking. Real value, but it is not evidence that any
+#                        fix worked.
+#   [N] new baseline   — the target did not exist before the fix, so there is no pre-fix
+#                        measurement. First trimmed measurement is the baseline.
+#   [P] present-by-design — asserted PRESENT, and NOT a tolerated leak. A bare `[Execute]`
+#                        carries no [Remote], so the generator emits no guard, nothing
+#                        folds, and the body is SUPPOSED to ship to the client: that is
+#                        the feature. Going red means a guard has appeared where the
+#                        contract says there is none. See the pair block at the bottom.
+#
+# Every BODY marker here has been measured PRESENT in the UNTRIMMED build, which proves the
+# PROBE can see it — see reviews/009-evidence/probe-selfcheck-final-all-legs.txt, which covers
+# every leg including class-[Execute]. (The state-machine names in the per-site block at the
+# bottom are the exception by construction: `<LocalX>d__` is ABSENT untrimmed precisely
+# because the site is wrapped, which is the property being asserted. Their untrimmed
+# counterparts are the `<LocalXCore>d__` names, measured PRESENT in the same file.)
+# Untrimmed presence is necessary but NOT sufficient for a check to be meaningful:
+# `ServerOnlyHelper`
+# was untrimmed-PRESENT for months while nothing referenced it, so ILLink dropped it
+# unconditionally and its absence could never have gone red. A marker is only meaningful if
+# something a defect could plausibly affect actually roots it. The `*Backend` implementation
+# markers below (ClassLegBackend, AsyncLegBackend, IfaceLegBackend, SaveLegBackend,
+# RelayLegBackend) are reachable only from DI registrations inside the harness's own
+# IsServerRuntime block, so they can only go red if the feature switch stops folding
+# altogether — which ServerOnlyDirect already covers. They are kept as cheap breadth, not
+# relied on as leg-specific signals.
+# ---------------------------------------------------------------------------
+check_absent() {
+    local marker="$1" leg="$2"
+    if present "$marker"; then
+        fail "[$leg] '$marker' found in the trimmed assembly. Server-only code is shipping to clients."
+    else
+        echo "   ok      $marker"
+    fi
+}
+
+# The counterpart to check_absent, for [P] markers. Failing means the OPPOSITE
+# problem: a body the contract says runs on the client has been trimmed away.
+check_present() {
+    local marker="$1" leg="$2"
+    if present "$marker"; then
+        echo "   ok      $marker"
+    else
+        fail "[$leg] '$marker' is MISSING from the trimmed assembly. A bare [Execute] body was trimmed — it carries no [Remote], so no guard should exist to fold it. Client-local execution is broken."
+    fi
+}
+
+echo "-- static factory ([Execute])"
+# [D] _DoWork, _ProcessRecord, IServerOnlyRepository, DoServerWork — all four measured PRESENT
+#     pre-fix (plan Current State, 2026-08-12 walk) and absent after. IServerOnlyRepository's
+#     flip is the headline evidence that the old (?<!I) exemption was unjustified, so labelling
+#     it [R] under-claimed the very marker this plan's Step 8 turns on.
+# [R] ServerOnlyDirect, ServerOnlyHelper, ServerOnlyHelper_MARKER — absent before and after.
+#     ServerOnlyRepository_MARKER is the IMPLEMENTATION body literal: the gate
+#     this replaced asserted it via `grep -aqP '(?<!I)ServerOnlyRepository'`, and the first
+#     rewrite dropped it, because grep -F "IServerOnlyRepository" cannot match the bare name.
+#     Restored as an explicit marker — it is unambiguous, and being UTF-16 it also exercises
+#     the NUL-stripped path.
+for m in _DoWork _ProcessRecord DoServerWork IServerOnlyRepository ServerOnlyRepository_MARKER \
+         ServerOnlyDirect ServerOnlyHelper ServerOnlyHelper_MARKER; do
+    check_absent "$m" "static factory"
+done
+
+echo "-- static factory, async body"
+# [N] async [Execute]. _DoAsyncWork is a method on the CONSUMER'S class — exactly the surface
+#     the registrar-DAM defect retained — so its absence is real evidence the fix generalizes
+#     to async [Execute] methods.
+#
+#     It is NOT evidence about async fold behaviour. The static leg's guard is a WRAPPING
+#     `if (IsServerRuntime) { ... }` inside the non-async FactoryServiceRegistrar, so the fold
+#     deletes the whole registration and the body is never rooted in the first place. Its
+#     async-ness is therefore never exercised. Same for the relay handler below.
+for m in _DoAsyncWork StaticAsyncBody_MARKER; do
+    check_absent "$m" "static factory (async)"
+done
+
+echo "-- relay handler ([FactoryEventHandler<T>])"
+# [D] RelayLegHandlerBody, IRelayLegPort, RelayLegInvoke, RelayLegHandlerBody_MARKER.
+# [R] RelayLegBackend — absent pre-fix too (it is DI-registered only behind the harness's
+#     own IsServerRuntime guard, so nothing ever rooted it). Kept, but NOT fix evidence.
+for m in RelayLegHandlerBody IRelayLegPort RelayLegInvoke RelayLegHandlerBody_MARKER; do
+    check_absent "$m" "relay handler"
+done
+check_absent "RelayLegBackend" "relay handler"
+for m in AsyncRelayHandlerBody RelayAsyncBody_MARKER; do
+    check_absent "$m" "relay handler (async)"
+done
+
+echo "-- interface factory"
+# [R] all of them — absent pre-fix as well, since this leg never had the defect.
+# NOTE what these do and do not prove. An interface factory reaches its implementation
+# through the INTERFACE (GetRequiredService<ITrimIfaceQuery>() then target.LookupAsync),
+# so the implementation body is never statically reachable from generated code and its
+# absence follows from that indirection — NOT from feature-switch folding. Useful as a
+# no-regression check on the implementation staying off the client; not evidence about
+# guard elimination.
+for m in TrimIfaceServerSide IIfaceLegPort IfaceLegInvoke IfaceLegBackend IfaceLegServerBody_MARKER; do
+    check_absent "$m" "interface factory"
+done
+# The async variant carries the SAME caveat, and it is structural rather than fixable here:
+# an interface factory reaches everything through interfaces, so no server-only implementation
+# name can appear directly in its generated local body. These markers cannot report on whether
+# the async body folded — they are no-regression checks only. See the remarks on
+# ITrimAsyncIfaceQuery, and Deferred Work item 19 for why the obvious fix does not compile.
+for m in TrimAsyncIfaceServerSide IfaceAsyncBody_MARKER; do
+    check_absent "$m" "interface factory (async)"
+done
+
+echo "-- class factory port"
+# [N] own port, so a class-factory leak no longer reports as a static-factory failure.
+#
+# IClassLegPort and ClassLegInvoke moved here from the assert-PRESENT block when TRIM-009
+# landed: the async FetchAsync body reached them via an in-body GetRequiredService<IClassLegPort>()
+# and a port call, and that body is now eliminated. They are the [D] discriminators for the
+# class leg — a regression in the async wrapper/holder fix turns these red first.
+# ClassLegBackend and its literal are weaker signals: they sit behind the IClassLegPort
+# interface hop, so nothing statically reaches them either way.
+for m in IClassLegPort ClassLegInvoke ClassLegBackend ClassLegBackend_MARKER; do
+    check_absent "$m" "class factory"
+done
+
+echo "-- class-level [Execute] leg (TRIM-009)"
+# [N] Class-level [Execute] is a DIFFERENT emission path from static [Execute]
+# (ClassFactoryRenderer.RenderClassExecuteLocalMethod, not StaticFactoryRenderer) and is
+# emitted `async` unconditionally. It had no harness coverage at all until TRIM-009 — found at
+# plan review, before the plan could close AC6 over an unmeasured shape.
+#
+# [N] is accurate and load-bearing: this target postdates the pre-fix probes, so there is NO
+# measurement of it leaking. Its body was rooted by an unguarded delegate registration and a
+# ctor method-group assignment, and H1 applies to its shape — but that is a reading of the
+# emitted source, not a measurement, and the distinction is exactly what AC6 asks for. What
+# IS measured: all five markers PRESENT in the untrimmed build (so these checks are not
+# vacuous), and absent here.
+for m in IExecLegPort ExecLegInvoke ExecLegBackend ExecLegBackend_MARKER ClassExecBody_MARKER; do
+    check_absent "$m" "class [Execute]"
+done
+
+echo "-- async-only port (shared by the three async targets above)"
+for m in IAsyncLegPort AsyncLegInvoke AsyncLegBackend; do
+    check_absent "$m" "async port"
+done
+
+# ---------------------------------------------------------------------------
+# THE CONTROLLED PAIR — sync vs async inside ONE class factory.
+#
+# ClassSyncBody_MARKER  lives in TrimTestEntity.Create      (sync)  -> expected ABSENT
+# ClassAsyncBody_MARKER lives in TrimTestEntity.FetchAsync  (async) -> expected ABSENT since TRIM-009
+#
+# (The async half was expected PRESENT while it was the open defect. Both are absent now --
+#  see the RESOLVED paragraph below. A red on either is a real regression, not an expectation.)
+#
+# Same class, same generated factory, same registrar, neither carrying [AuthorizeFactory<T>],
+# both one-hop rooted by their own delegate registration, both reached by a direct call on the
+# concrete type, both literals in the domain body rather than behind an interface hop.
+# The earlier sync/async comparison (this class's Create vs TrimSaveTarget's Insert) was NOT
+# controlled — it also differed in auth, target acquisition, one-hop vs two-hop rooting, and
+# catch-arm count, the last being the dimension the arc's disproven TRIM-004 story blamed.
+#
+# RESOLVED BY TRIM-009. This pair was the arc's decisive measurement; both halves are now
+# absent and both are asserted so. The co-variates once listed here as unseparable —
+# the extra `catch (OperationCanceledException)` arm and the four lifecycle type-tests —
+# WERE separated, from inside the generator:
+#
+#   V1  async minus all four probes AND the catch arm  -> STILL LEAKED  (not necessary)
+#   V2  sync plus the catch arm and a type-test        -> STILL CLEAN   (not sufficient)
+#
+# so the async state machine is the mechanism, and the arc's TRIM-004 story ("early-throw
+# guard plus try/catch defeats elimination") is falsified for the third time. The fix is a
+# NON-async wrapper carrying the guard plus a single-method registrar holder; neither half
+# suffices alone, because [DynamicallyAccessedMembers] covers NonPublicMethods and roots the
+# private core independently.
+# ---------------------------------------------------------------------------
+echo "-- controlled sync/async pair (class factory)"
+check_absent "ClassSyncBody_MARKER" "class factory (sync half of controlled pair)"
+check_absent "ClassAsyncBody_MARKER" "class factory (async half of controlled pair)"
+
+# ---------------------------------------------------------------------------
+# SAVE/CAN* WRITE PATH — absent since TRIM-009.
+#
+# These five were asserted PRESENT by TRIM-008 as a deliberate tripwire, so that CI would
+# fail loudly the moment the leak was fixed rather than quietly keep passing. It worked:
+# they are the markers TRIM-009 flipped, and they are [D] discriminators for the write path
+# (LocalInsert / LocalUpdate / LocalDelete, plus LocalSave routing into them).
+# ---------------------------------------------------------------------------
+echo "-- save/can* write path"
+for m in ISaveLegPort SaveLegInvoke SaveLegInsertBody_MARKER SaveLegUpdateBody_MARKER SaveLegDeleteBody_MARKER; do
+    check_absent "$m" "save/can*"
+done
+
+# ---------------------------------------------------------------------------
+# PER-SITE WRAPPER DISCRIMINATORS — the async state machines themselves.
+#
+# WHY THESE EXIST. Every marker above is a *body* signal, and body signals cannot
+# tell "this method was wrapped" from "an ancestor's fold removed the only reference
+# to it". LocalSaveCore routes to the Insert/Update/Delete WRAPPERS, so if a future
+# edit unwrapped RenderSaveLocalMethod (or the Can*/class-[Execute] site) the markers
+# above could still come back clean while a guarded async body shipped. TRIM-009's own
+# plan named that blind spot before it shipped one; this block closes it.
+#
+# HOW THEY DISCRIMINATE. A wrapped site has NO `<LocalX>d__` — the wrapper is not async,
+# and the state machine is named `<LocalXCore>d__` instead. Unwrap a site and `<LocalX>d__`
+# comes back AND (per H1) its body survives, so the name lands in the trimmed output.
+#
+# [D] for the first five: all were measured PRESENT in the pre-fix trimmed assembly
+# (reviews/009-evidence/probe-h1h2-v1/v2), so these are real discriminators with a
+# baseline, not new-shape guesses. [N] for LocalRunExecCommand — the class-[Execute]
+# target postdates the pre-fix probes; it is measured PRESENT untrimmed instead
+# (probe-selfcheck-final-all-legs.txt).
+# ---------------------------------------------------------------------------
+echo "-- per-site wrapper discriminators (async state machines)"
+for m in '<LocalFetchAsync>d__' '<LocalInsert>d__' '<LocalUpdate>d__' '<LocalDelete>d__' '<LocalSave>d__' '<LocalRunExecCommand>d__'; do
+    check_absent "$m" "guarded async site lost its sync wrapper"
+done
+
+# ---------------------------------------------------------------------------
+# THE BARE / [Remote] PAIR — [Execute] obeys [Remote] (EXRM-003).
+#
+# Everything above is an absence check, and absence alone cannot distinguish
+# "the guard folded" from "the feature is dead". Every leg in this gate has been
+# measured one-sided for that reason, and the arc that built it kept rediscovering
+# the same hazard: a check that passes more easily when nothing works.
+#
+# These two close it for [Execute]. Since EXRM-001/002 the attribute decides the
+# emission on both shapes:
+#
+#   [Remote, Execute]  -> guarded local registration (+ a remote one). Body ABSENT.
+#   [Execute]          -> ONE unguarded local registration, no remote delegate,
+#                         no guard to fold. Body PRESENT — deliberately.
+#
+# Each pair is controlled: same class, same generated registrar, same holder, same
+# [Service] injection style, and the same async-ness (the static pair is sync on both
+# halves; the class pair awaits a port call on both, TRIM-009's axis). So the two
+# halves cannot both be satisfied by an accident. A guard creeping onto bare
+# [Execute] reddens the PRESENT half; a guard lost from [Remote, Execute] reddens
+# the ABSENT half above.
+#
+# NOT CONTROLLED, and it cannot be: the [Service] TYPE differs, because the [Remote]
+# half's port is server-only by construction and the bare half's must be resolvable
+# on the client. The known-bad run neutralises it — the client-safe port stays
+# registered unconditionally there, so adding [Remote] alone took both markers to
+# MISSING. The bodies survive because no guard is emitted, not because their port is
+# rooted from DI.
+#
+# ASYNC IS COVERED ON BOTH SHAPES, and deliberately so: TRIM-009 located the class
+# leg's defect in async emission, so a gate that measured only synchronous bare
+# bodies would generalize across the one boundary this arc has already been burned
+# by. Three pairs: static sync (_DoWork / _ComputeTally), static async
+# (_DoAsyncWork / _ComputeTallyAsync), and class async (RunExecCommand /
+# RunBareCommand). Each is matched on async-ness within itself.
+#
+# WHAT IS ASSERTED HERE, AND WHAT IS NOT. Only the two BODY LITERALS. The bare
+# targets' [Service] is IClientTallyPort, registered outside the harness's
+# IsServerRuntime guard so the client can resolve it — which means it is rooted
+# from the DI graph whether or not the bodies survive, and a present check on that
+# name could never go red. Asserting it would have re-created this gate's oldest
+# defect in the one block written to retire it.
+#
+# NOT PROVEN BY A GREP: that the bodies still EXECUTE. A retained-but-unreachable
+# body would satisfy both checks below. Program.cs therefore resolves and CALLS
+# both bare members on the trimmed client and matches these same markers in the
+# returned values; the harness exits non-zero if either does not run.
+#
+# RED-BEFORE-GREEN. Both checks were observed FAILING against a variant of this
+# harness in which the two bare targets carry [Remote], with every absence check
+# above still green in the same run. See reviews/003-evidence/ in the EXRM todo.
+# The archived pre-EXRM-003 artifact is NOT the right known-bad build for them:
+# there the targets do not exist, so they would go red for the reason the positive
+# controls at the top of this file already stop the run over.
+# ---------------------------------------------------------------------------
+echo "-- bare [Execute] bodies (present by design, both shapes)"
+# [P] All three. Their [Remote] siblings' markers — _DoWork and _ProcessRecord,
+#     _DoAsyncWork/StaticAsyncBody_MARKER, and ClassExecBody_MARKER in the
+#     class-[Execute] block — are the absent halves of these same three pairs.
+check_present "BareStaticBody_MARKER" "static factory (bare half of the sync [Execute] pair)"
+check_present "BareTallyAsyncBody_MARKER" "static factory (bare half of the async [Execute] pair)"
+check_present "BareClassBody_MARKER" "class [Execute] (bare half of the [Execute] pair)"
+
+echo
+if [ "$failures" -gt 0 ]; then
+    echo "::error::Trimming verification FAILED ($failures check(s))."
+    exit 1
+fi
+
+echo "Trimming verification passed."
+echo "  Absent:  static factory ([Execute], sync and async), relay handler (sync and async),"
+echo "           interface factory implementations, class-level [Execute], and BOTH halves of"
+echo "           the class-factory body — sync and async, read and write."
+echo "  Present: the three BARE [Execute] bodies — static sync, static async, class async —"
+echo "           by design, not as a tolerated leak. They carry no [Remote], so no guard is"
+echo "           emitted and nothing folds; shipping them to the client is the feature."
+echo "           Their [Remote] siblings sit in the absence list above, so every shape is"
+echo "           measured as a pair, matched on async-ness within each pair."
+echo "  No shape is asserted PRESENT as a known leak. TRIM-008 and TRIM-009 closed the last two;"
+echo "  if a leak is found in a shape this gate does not name, add the marker rather than"
+echo "  widening an existing one, so the failure keeps naming its leg."
+echo
+echo "  NOT proven here: the interface-factory leg's method BODIES. It reaches everything"
+echo "  through interfaces, so its markers read absent either way (Deferred Work item 20;"
+echo "  item 19 blocks the fix that would give it a reachable marker). Absence above is a"
+echo "  no-regression signal for that leg, not a body-elimination proof."
