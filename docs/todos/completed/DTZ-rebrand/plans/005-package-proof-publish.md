@@ -4,8 +4,8 @@
 **Date:** 2026-11-06
 **Related Todo:** [../todo.md](../todo.md)
 **Serves:** AC-1, AC-6, AC-7
-**Status:** In Progress
-**Last Updated:** 2026-11-07
+**Status:** Done
+**Last Updated:** 2026-11-11
 **Plan-review opt-in:** No (the user confirms the clean push and the publish before each happens)
 **Code-review opt-in:** No (the only code change is the version)
 **Branch:** `DTZ-005-package-proof-publish`, local only
@@ -55,9 +55,9 @@ The release follows `CLAUDE.md`: version in `src/Directory.Build.props`, notes i
 - [x] The trimming check passes at 2.0.0. `[integration]`
 - [x] Both packages carry the right ID, version, description and generator, with no old name. `[explicit-skip: no behavior; proved by the package inspection]`
 - [x] Neatoo's tests pass against the local packages, with the same counts as its baseline. `[integration]`
-- [ ] The public repo's first commit has no parent, and no commit in its history has the old name. `[explicit-skip: no behavior; proved by a clone of the public repo]`
-- [ ] CI is green on the public repo. `[integration]`
-- [ ] 2.0.0 of both packages is on NuGet. `[explicit-skip: external; proved by the package pages]`
+- [x] The public repo's first commit has no parent, and no commit in its history has the old name. `[explicit-skip: no behavior; proved by a clone of the public repo]`
+- [x] CI is green on the public repo. `[integration]`
+- [x] 2.0.0 of both packages is on NuGet. `[explicit-skip: external; proved by the package pages]`
 
 ## Current State (Pre-Flight)
 
@@ -79,7 +79,9 @@ The release follows `CLAUDE.md`: version in `src/Directory.Build.props`, notes i
 | Trimming check | `reviews/005-trim-publish.log`, `005-trim-verify.log`, `005-trim-harness.log` | Publish, verifier and harness pass. The harness ran in WSL Ubuntu-24.04 |
 | Packages | `reviews/005-packages.log` | IDs, 2.0.0, "Zero DTOs" descriptions, generator under `analyzers/dotnet/cs`, no old name in names, nuspec or DLL bytes |
 | Neatoo proof | `reviews/005-neatoo.log` | `Neatoo.sln` 2,030 passed and 2 skipped, `Design.sln` 235 passed, 0 failed. Counts equal a clean clone's baseline. Unit test output holds the packed `DTZero.dll` by hash |
-| Public history, CI, NuGet | Pending the user's confirmation | Not yet run |
+| Public history | A fresh clone of the public repo, and `reviews/005-scan-public.log` | One commit with no parent, and its tree equals the finished tree. The scan of 1,110 files finds no joined old name in any case, in UTF-8, UTF-16, paths, the message or identities. It finds 17 two-word "remote factory" phrases, which DTZ-003 kept. The scanner fires on the baseline and on a planted UTF-16 file |
+| CI | `reviews/final-ci-main.log` and `final-ci-tag.log`, runs 43141600181 and 43142287989 | Both green: 3,430 passed, 12 skipped, 0 failed, equal to the baseline. The trimming check passes, and its 25 trim-analysis warnings match the local 2.0.0 run's |
+| NuGet | The tag run's publish job, and both package pages | The OIDC token was exchanged for a key, both packages were pushed, and the GitHub Release has both. `DTZero` and `DTZero.AspNetCore` 2.0.0 are listed, owned by `NeatooDotNet` |
 
 **Neatoo adaptation:** names came from DTZero's own source. Four files gained `using Neatoo;` and one test lost a partial qualifier. No Neatoo test or assertion changed otherwise.
 
@@ -91,6 +93,8 @@ The release follows `CLAUDE.md`: version in `src/Directory.Build.props`, notes i
 - Round 2, pre-publish: CONCERNS, last round. No veto. One route to the old history through the closing commit, closed after the round and not re-reviewed. See `reviews/005-test-review.md`.
 
 ## Plan Amendments
+
+- 2026-11-11: the push slipped from 2026-11-07, so the release note and its index rows carry 2026-11-11, the push day.
 
 - 2026-11-07, after the gate: the user chose NuGet Trusted Publishing over a stored key. The publish job now has `id-token: write`, and `NuGet/login@v1` swaps GitHub's OIDC token for a one-hour key. `NUGET_USER` in the public repo's `nuget` environment holds the nuget.org profile name. The user creates the policy on nuget.org for repo `NeatooDotNet/DTZero`, workflow `build.yml` and environment `nuget`. The change was not re-reviewed, and the push to `main` does not run the publish job, so the tag is its first run. A login failure stops the job before anything is published.
 

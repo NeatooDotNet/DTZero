@@ -2,9 +2,9 @@
 
 **ID:** DTZ
 **Type:** Enhancement
-**Status:** In Progress
+**Status:** Complete
 **Created:** 2026-11-06
-**Last Updated:** 2026-11-07
+**Last Updated:** 2026-11-12
 **Initial split:** 5 plans
 **Plan cap:** 8 — max(ceil(5 × 1.5), 5 + 2). Counts plan numbers issued, including Abandoned and Retired.
 **Arc branch:** `DTZ`
@@ -30,7 +30,7 @@ DTZero contains everything the predecessor library had, rebranded, with no refer
 - [x] **AC-4** · Required — All 39 issues are in DTZero, and every citation uses the new numbers.
 - [x] **AC-5** · Required — The README and NuGet description lead with "Zero DTOs".
 - [x] **AC-6** · Required — Neatoo's tests pass against locally packed DTZero packages on a throwaway branch.
-- [ ] **AC-7** · Required — CI is green on DTZero, and 2.0.0 of both packages is on NuGet.
+- [x] **AC-7** · Required — CI is green on DTZero, and 2.0.0 of both packages is on NuGet.
 - [x] **AC-8** · Required — A DTZero skill is installed in `~/.claude/skills`, and the repo holds only the DTZero skill.
 - [ ] **AC-9** · Optional — A DTZero icon replaces `neatoo_icon.png`, and the demo GIF is re-recorded if it shows the old name.
 
@@ -53,7 +53,7 @@ DTZero contains everything the predecessor library had, rebranded, with no refer
 | 002 | [002-issue-transfer](./plans/002-issue-transfer.md) | Re-create all issues in DTZero | AC-4 | Done | local |
 | 003 | [003-docs-and-links](./plans/003-docs-and-links.md) | Rebrand docs and remove old links | AC-2, AC-3, AC-4, AC-5 | Done | local |
 | 004 | [004-dtzero-skill](./plans/004-dtzero-skill.md) | Replace the skill with DTZero's | AC-3, AC-4, AC-8 | Done | local |
-| 005 | [005-package-proof-publish](./plans/005-package-proof-publish.md) | Prove packages against Neatoo, then publish | AC-1, AC-6, AC-7 | In Progress | — |
+| 005 | [005-package-proof-publish](./plans/005-package-proof-publish.md) | Prove packages against Neatoo, then publish | AC-1, AC-6, AC-7 | Done | local |
 
 ---
 
@@ -131,10 +131,19 @@ DTZero contains everything the predecessor library had, rebranded, with no refer
 
 ## Close-Out Audit
 
+- 2026-11-07, pre-publish: C, on AC-9's icon row, which had no issue.
+- 2026-11-11, re-audit: **B**. AC-9's icon half is parked as #40. Acknowledged by Keith, 2026-11-12. See `reviews/close-out-audit.md`.
+
 ---
 
 ## Docs & Retro
 
+**Documentation:** The docs, README and skill were renamed in DTZ-003 and DTZ-004, and the release note shipped in DTZ-005. No internal-contradiction callouts were parked. The only doc debt is the icon, #40.
+
+**Retro:** 5 plans were issued, against a cap of 8. 11 findings were dismissed, 1 punched, and 5 parked as two issues, #40 and Neatoo#126. None were queued. The first lesson is about history: when the Goal includes a clean public history, decide where the baseline lives before the first commit. Here an import commit reached the public repo, and that forced a switch to a private working repo. The second is about checks: a check that shares the rewrite's matching rule shares its blind spots. DTZ-003's gate found 18 missed citations, and only a scan with no boundary rule caught them. Where these lessons go is the user's call.
+
 ---
 
 ## Results / Conclusions
+
+DTZero 2.0.0 shipped on 2026-11-11 as `DTZero` and `DTZero.AspNetCore`. It was built from one clean commit on the public `main` and published with Trusted Publishing. Behavior and test counts match the predecessor, the 39 issues were re-created, and the DTZero skill replaced the old one. Neatoo and zCRM move in Neatoo#126, and the icon is #40.

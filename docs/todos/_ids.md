@@ -7,12 +7,12 @@ abandonment. Move rows to the Completed section together with the folder move.
 
 | ID | Todo | Created | Location |
 |----|------|---------|----------|
-| DTZ | Rebrand to DTZero | 2026-11-06 | [DTZ-rebrand](./DTZ-rebrand/todo.md) |
 
 ## Completed
 
 | ID | Todo | Completed | Location |
 |----|------|-----------|----------|
+| DTZ | Rebrand to DTZero | 2026-11-12 | [DTZ-rebrand](./completed/DTZ-rebrand/todo.md) |
 | RFSK | Rebuild the DTZero skill around the model and the trap rows | 2026-10-16 | [RFSK-skill-rebuild](./completed/RFSK-skill-rebuild/todo.md) |
 | EXSET | One compiled example set, and the audit against it | 2026-10-15 | [EXSET-example-set-consolidation](./completed/EXSET-example-set-consolidation/todo.md) |
 | DICT | Dictionary and public-field DTO preservation | 2026-10-06 | [DICT-dictionary-dto-preservation](./completed/DICT-dictionary-dto-preservation/todo.md) |

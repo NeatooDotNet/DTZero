@@ -46,3 +46,35 @@ Not triaged. Three gitignored baseline logs hold the old name and do not reach t
 ### Container
 
 Plans 5 of a cap of 8. Discovery Log conforms. Build and tests green.
+
+## 2026-11-11 — Re-Audit
+
+**Grade: B.** Every Required criterion traces, and there are no veto-tier findings. The C item is closed: AC-9's icon half is still unmet, and its Parked row now carries #40. AC-7 now traces in full.
+
+| AC | Word | Evidence | Holds? |
+|---|---|---|---|
+| AC-1 | Required | Both CI runs on the clean commit, `reviews/final-ci-main.log` and `final-ci-tag.log`: 0 errors, 3,430 passed, 12 skipped, 0 failed, equal to baseline. | Yes |
+| AC-2 | Required | Code unchanged since the last audit, apart from `build.yml`. The only `Neatoo` hits are the org URL and a comment naming Neatoo's own converters. | Yes |
+| AC-3 | Required | 0 matches and 0 paths among 1,110 files. The public tree equals the finished tree. The scan's 17 hits are the two-word phrase DTZ-003 kept, and the scanner fires on the baseline. | Yes |
+| AC-4 | Required | 40 issues: the 39 re-created plus #40. | Yes |
+| AC-5 | Required | `README.md`, and both NuGet descriptions start "Zero DTOs." | Yes |
+| AC-6 | Required | `reviews/005-neatoo.log`, unchanged. | Yes |
+| AC-7 | Required | Both runs green on the one public commit, which has no parent. The tag run exchanged the OIDC token and pushed both packages. Both 2.0.0 packages are listed, owned by `NeatooDotNet`, and the GitHub Release carries both. | Yes |
+| AC-8 | Required | `skills/` holds only `DTZero`, and the skill is installed. | Yes |
+| AC-9 | Optional | GIF checked. The icon is unmet. | No, icon only: #40 |
+
+### Callouts and Dispositions
+
+| # | Finding | Disposition |
+|---|---|---|
+| C1 | The plan branch was not merged into the local arc, so the closing commit could take stale todo files. | Fixed: the arc was fast-forwarded to the plan branch, and the closing commit is built from it. |
+| C2 | The header says the private working repo was deleted, and it still existed. | The user deletes it before the closing commit is pushed. |
+
+### Could Not Verify
+
+- The nuget.org policy itself. The successful token exchange shows it exists and works.
+- zCRM's own todos, carried over.
+
+### Theoretical
+
+Not triaged. The Trusted Publishing change was not gate-reviewed. The auditor read it and found nothing to raise, and it ran green on the tag.
