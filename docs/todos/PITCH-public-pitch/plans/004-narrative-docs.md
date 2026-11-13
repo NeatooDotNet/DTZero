@@ -20,3 +20,5 @@ Revise the pages a newcomer reads in order (the docs landing page, `the-problem`
 - State early that the graph that crosses is the DDD conceptual graph, and that the persistence model stays on the server behind a `[Service]` parameter.
 - The AI argument, with the skill presented as part of the library (R4).
 - The public-API page or section, from the Design sample PITCH-003 adds.
+- From the DDD map (PITCH-002): state "factory methods call factory methods" as the one idea, early, with fetch and save as its two cases and one call tree showing the single crossing. Say this is the work a repository does elsewhere. "Cascade" is not the public word; it may appear once as what an ORM calls it.
+- From the DDD map: root and child are roles an entity takes, decided by the factory method's parameters, not kinds of class.
