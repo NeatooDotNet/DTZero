@@ -41,7 +41,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 
 | # | File | Title (≤ 8 words) | Serves | Status | PR |
 |---|------|-------|--------|--------|----|
-| 001 | [001-verdict](./plans/001-verdict.md) | The verdict: is DTZero useful to others | AC-1 | Done | — |
+| 001 | [001-verdict](./plans/001-verdict.md) | The verdict: is DTZero useful to others | AC-1 | Done | #41 |
 | 002 | [002-ddd-map](./plans/002-ddd-map.md) | Map DDD concepts to DTZero components | AC-2 | Draft | — |
 | 003 | [003-readme](./plans/003-readme.md) | Rewrite the README around the case | AC-3, AC-7 | Draft | — |
 | 004 | [004-narrative-docs](./plans/004-narrative-docs.md) | Narrative docs carry the why | AC-4, AC-7 | Draft | — |
