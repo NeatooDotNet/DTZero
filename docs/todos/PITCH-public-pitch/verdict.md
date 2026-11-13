@@ -160,6 +160,8 @@ Each of these needs an answer in the docs, or an admission.
 
 It is also most of the answer to tampering (section 7, item 2). One caution for the docs: a target rule that reads state from the object the client sent is checking input. The page's own example refuses a write when `Status` is `Locked`; a hostile caller sends a different status. Because the auth class has injection, it can read the stored record instead, and the page should show that.
 
+**2026-11-13, Keith, fifth:** the authorization examples take the user by constructor (Design's `AuthorizedOrderAuth` already takes `ICurrentUser`), and the docs add a second step: a base authorization class, shared by every auth class, that holds the broad read and write check. The generator gathers auth methods with `GetMethodsRecursive`, so inherited methods look supported, but no Design sample or test pins it (checked 2026-11-13). The sample and its test come before the page shows it. PITCH-005 carries this.
+
 Superseded note, kept for the record: Question 1 (the rest of R1 to R5) and questions 2 and 3 remain open. Question 4 is answered for Blazor WebAssembly and WPF; MAUI is not confirmed.
 
 ## 9. Sources
