@@ -150,6 +150,16 @@ Each of these needs an answer in the docs, or an admission.
 
 **2026-11-13, Keith, third:** R3, R4 and R5 are accepted. The client and the server deploy together; "teams that version them separately" stays in section 4 without its "to confirm". Question 3 (tampering) is under discussion.
 
+**2026-11-13, Keith, fourth:** authorization is a strength the verdict under-weighted, and it joins the pitch. "This authorization model is better than anything I've been able to do with controllers." What it has that a controller's `[Authorize]` does not:
+
+- The rule is a class with constructor injection, so it can use any service.
+- One copy serves both tiers: the server enforces it, and the client asks the same rule through `Can*` to decide what to show.
+- It can refuse one record (a parameter of the operation) or inspect the object being saved (the target).
+- It is attached to the factory, so no entry point can miss it.
+- It is tested without HTTP.
+
+It is also most of the answer to tampering (section 7, item 2). One caution for the docs: a target rule that reads state from the object the client sent is checking input. The page's own example refuses a write when `Status` is `Locked`; a hostile caller sends a different status. Because the auth class has injection, it can read the stored record instead, and the page should show that.
+
 Superseded note, kept for the record: Question 1 (the rest of R1 to R5) and questions 2 and 3 remain open. Question 4 is answered for Blazor WebAssembly and WPF; MAUI is not confirmed.
 
 ## 9. Sources
