@@ -61,7 +61,7 @@ A team that has all of these:
 - **Anyone whose only client is not .NET.** DTZero's endpoint is not a contract anyone else can call. It is for the application. A public API beside the application is a different matter: its endpoints are hand-written, as they should be for a contract, and they call the same domain graph on the server.
 - **Blazor Server only.** There is no wire to cross.
 - **Thin CRUD over tables.** With no behaviour to share, minimal APIs and a generated client are simpler and familiar to everyone.
-- **Teams that version the client and the server separately.** (To confirm with the user: section 8, question 2.)
+- **Teams that version the client and the server separately.** The client and the server deploy together.
 ## 5. The alternatives
 
 Facts as fetched on 2026-11-13; sources in section 9.
@@ -148,7 +148,9 @@ Each of these needs an answer in the docs, or an admission.
 
 **Gap this opens:** no page and no Design sample shows an API endpoint calling a factory on the server (checked 2026-11-13: the only `Map*` call in `src/` is the library's own endpoint). The claim needs a Design region and a test that pins it before the README makes it. PITCH-003 or PITCH-004 carries that.
 
-Question 1 (the rest of R1 to R5) and questions 2 and 3 remain open. Question 4 is answered for Blazor WebAssembly and WPF; MAUI is not confirmed.
+**2026-11-13, Keith, third:** R3, R4 and R5 are accepted. The client and the server deploy together; "teams that version them separately" stays in section 4 without its "to confirm". Question 3 (tampering) is under discussion.
+
+Superseded note, kept for the record: Question 1 (the rest of R1 to R5) and questions 2 and 3 remain open. Question 4 is answered for Blazor WebAssembly and WPF; MAUI is not confirmed.
 
 ## 9. Sources
 
