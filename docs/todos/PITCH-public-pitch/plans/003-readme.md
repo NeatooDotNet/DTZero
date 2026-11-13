@@ -77,9 +77,21 @@ Rewrite `README.md` from the ruled verdict and the confirmed DDD map: the proble
 
 ## Punchlist
 
+- [ ] Decide whether the public endpoints carry `RequireAuthorization`, and show an authorized aggregate reached through a public endpoint so "no entry point can miss the rule" has a test · `PublicApi/PublicOrderApi.cs` · decided with the user; if shown, an HTTP test pins it · AC-7 (fits PITCH-005, authorization)
+
 ---
 
 ## Test Evidence
+
+All in `src/Design/Design.Tests/Http/PublicOrderApiHttpTests.cs`, on the real server host. Logs: `reviews/003-impl-build.log`, `reviews/003-impl-test.log` (Design.Tests 180 to 187 per framework).
+
+| Acceptance bullet | Test | Tier |
+|---|---|---|
+| Designed contract for a stored order | `Get_StoredOrder_ReturnsTheDesignedContract`, `Get_MissingOrder_Is404` | integration, confirmed |
+| Verb through the public endpoint changes the stored order by the same rule | `Submit_DraftWithLines_ChangesTheStoredOrder` (read back through the DTZero client factory) | integration, confirmed |
+| Refuses what the domain refuses, no second copy | `Submit_EmptyDraft_IsRefused_LikeTheApplicationsCommand_AndStaysADraft`, `Submit_AlreadySubmitted_IsRefused_AndTheStoredOrderIsUnchanged` | integration, confirmed |
+
+Also added, beyond the bullets: `Get_NonNumericId_Is400`, `Submit_MissingOrder_Is404`.
 
 ---
 
@@ -88,6 +100,10 @@ Rewrite `README.md` from the ruled verdict and the confirmed DDD map: the proble
 ---
 
 ## Plan Amendments
+
+- 2026-11-13, Step 1: the route has no `:int` constraint. With one, a non-numeric id matched no endpoint and the SPA fallback answered 200 with `index.html`; without it the request reaches the endpoint and gets 400. `Get_NonNumericId_Is400` pins this.
+- 2026-11-13, Step 1: `app.MapPublicOrderApi()` and its comment sit inside the `getting-started-server-program` region, so the README and getting-started embeds gain two lines at the next mdsnippets run.
+- 2026-11-13, Step 1: `Order` has no authorization, so the sample shows none. `[Service]` parameters resolve from the request scope when server code calls the factory.
 
 ---
 
