@@ -7,6 +7,7 @@ abandonment. Move rows to the Completed section together with the folder move.
 
 | ID | Todo | Created | Location |
 |----|------|---------|----------|
+| PITCH | Make DTZero's public case | 2026-11-13 | [PITCH-public-pitch](./PITCH-public-pitch/todo.md) |
 
 ## Completed
 
