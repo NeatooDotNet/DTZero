@@ -8,7 +8,10 @@ Yes, to a narrow audience, and not for the reason the README gives today.
 
 DTZero is not a mass-market library and will not become one. Its realistic ceiling is the niche CSLA has held for twenty years. Inside that niche it is one of two real options, and the only one that needs no base class.
 
-The README's lead claim, "zero boilerplate", is the claim AI has weakened most. The claim AI has strengthened is a different one: **the domain is defined once, runs on both tiers, and the compiler checks the seam.** That should be the pitch.
+The README's lead claim, "zero boilerplate", is the claim AI has weakened most. Two claims survive, and together they are the pitch:
+
+- **DTOs and controllers were a workaround for a language boundary.** The browser ran JavaScript, so the domain could not go there. With .NET on both tiers that boundary is gone, and doing it the old way is a habit, not a need.
+- **The domain is defined once, runs on both tiers, and the compiler checks the seam.**
 
 ## 2. What it saved in one production application
 
@@ -56,8 +59,6 @@ A team that has all of these:
 - **Blazor Server only.** There is no wire to cross.
 - **Thin CRUD over tables.** With no behaviour to share, minimal APIs and a generated client are simpler and familiar to everyone.
 - **Teams that version the client and the server separately.** (To confirm with the user: section 8, question 2.)
-- **Teams that want persistence out of the domain class.** A DTZero `[Insert]` sits on the entity and takes the data store as a parameter. A strict DDD reader will object, and the docs should answer that rather than hope it is not noticed.
-
 ## 5. The alternatives
 
 Facts as fetched on 2026-11-13; sources in section 9.
@@ -106,7 +107,8 @@ Each of these needs an answer in the docs, or an admission.
 
 1. **"This is CSLA."** Yes, the idea is the data portal. The difference is no base class and any type. Say so before the reader does.
 2. **"The client sends the whole object. What stops tampering?"** The docs do not answer this directly today. It is the first question a security-minded reader asks.
-3. **"Persistence in the entity."** See section 4.
+3. **"Persistence in the entity."** A reader who sees `[Insert]` on an entity will assume the persistence model is on the client. It is not, and the docs must say so early. The graph that crosses is the conceptual DDD graph, shaped for the domain. The persistence model (the EF entities) is a different shape, stays on the server, and is reached only through a `[Service]` parameter of a server-run method. The object maps itself to its row and holds no reference to the store. This is the CSLA arrangement. It is an attack to answer, not a reason to stay away (Keith, 2026-11-13).
+7. **"DTOs do more than cross a language boundary."** They also version a contract, shape a payload and limit what a caller may set. The pitch concedes all three for a public API and claims only the case where the client and the server are one application.
 4. **"Trimming."** The production evidence shows real cost. Some gaps have closed since version 1.9.0; which remain is not established here.
 5. **"Blazor WebAssembly is small."** Blazor as a whole is 7% of respondents in the 2025 Stack Overflow survey, and no credible split by render mode was found.
 6. **"One maintainer, a repository two days old, twenty open issues."** True. The honest counter is a production application running on it and the test suite.
@@ -115,7 +117,7 @@ Each of these needs an answer in the docs, or an admission.
 
 **Recommended ruling:** DTZero is worth publishing as a deliberately niche library. Plans 002 to 007 run at full scope, with these positions:
 
-- **R1. The lead claim** is "one domain model on both tiers, with the seam checked by the compiler". "Zero boilerplate" and "this changes everything" go.
+- **R1. The lead claim** has two parts. First: DTOs and controllers were a workaround for the JavaScript boundary, so why keep them when .NET is on both tiers. Second: one domain model on both tiers, with the seam checked by the compiler. "Zero boilerplate" goes as the headline. The opportunity argument stays and is sharpened; only the phrase "this changes everything" goes.
 - **R2. The audience** is section 3, and section 4 appears in the README as "when not to use it".
 - **R3. CSLA is named openly** as the ancestor, with "no base class, any type" as the difference. No trimming or AOT comparison is made.
 - **R4. The AI argument** appears in the docs in the form of section 6's last paragraph, and the skill is presented as part of the library.
@@ -130,7 +132,12 @@ Each of these needs an answer in the docs, or an admission.
 
 ### Ruling
 
-*Pending.*
+**2026-11-13, Keith, partial:**
+
+- "Teams that want persistence out of the entity" is struck from section 4. The transferred graph is the DDD conceptual graph, not the EF model, as in CSLA.
+- The niche is the client technology: Blazor WebAssembly and WPF. Inside it the argument is "why do it the old way, as when we were stuck with JavaScript". R1 is reworded to lead with it.
+
+Question 1 (the rest of R1 to R5) and questions 2 and 3 remain open. Question 4 is answered for Blazor WebAssembly and WPF; MAUI is not confirmed.
 
 ## 9. Sources
 
