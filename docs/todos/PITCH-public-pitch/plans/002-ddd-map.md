@@ -9,7 +9,7 @@
 **Plan-review opt-in:** No (a document the user confirms directly)
 **Code-review opt-in:** No (no code)
 **Branch:** `PITCH-002-ddd-map`
-**PR:** —
+**PR:** #42
 
 ---
 
