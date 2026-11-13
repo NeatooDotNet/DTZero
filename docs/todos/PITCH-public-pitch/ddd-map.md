@@ -1,6 +1,6 @@
 # DDD Concepts and DTZero Components
 
-**Plan:** PITCH-002 · **Written:** 2026-11-13 by Claude · **Confirmation:** pending (section 4)
+**Plan:** PITCH-002 · **Written:** 2026-11-13 by Claude · **Confirmation:** given 2026-11-13 with two corrections (section 4)
 
 This is the working map later plans write from. It starts from `docs/VisionAlignment.md` section 3, with every "Compiled example" cell re-checked against `src/Design` as it stands today, and adds the column that table lacks: the reason.
 
@@ -10,8 +10,10 @@ The reader is assumed to know DDD. Nothing here explains a concept.
 
 | DDD concept | With DTZero | Why it is this way | Design example |
 |---|---|---|---|
-| Aggregate root | A `[Factory]` class behind a public interface. `[Remote]` on the operations the client calls. `IFactorySaveMeta` gives `Save` its routing. | The root is the only object the client asks the server for, so it is where a call crosses. One `Save` is one request and one transaction. | `Aggregates/Order.cs` |
-| Child entity | A `[Factory]` class with a `public` local `[Create]`; every other operation `internal`, never `[Remote]`. | A child is reached through its root. Its persistence runs inside the root's call, already on the server, so it has no entry point of its own. `internal` also lets the trimmer remove it from the client. | `Entities/OrderLine.cs` |
+| Entity | A `[Factory]` class behind a public interface. `IFactorySaveMeta` gives `Save` its routing. Root and child are not kinds of class. They are roles, and one class can hold both. | DTZero has no root type and no child type to declare. What an entity is in a given graph is decided by which of its factory methods that graph calls, and the author writes those. | `Entities/OrderLine.cs` holds both roles |
+| Entity in the root role | A factory method the client calls: `[Remote] internal`, taking what the client has, such as an id. | The client asks the server for this object directly, so this is where a call crosses. One `Save` is one request and one transaction. | `Aggregates/Order.cs`; `Fetch(Guid id)` on `OrderLine` |
+| Entity in the child role | A factory method another factory method calls: `internal`, no `[Remote]`, taking what the parent already holds, such as its row. | The call is already on the server when the parent makes it, so there is no crossing to mark. `internal` also lets the trimmer remove the body from the client. | `Fetch(OrderLineRow row)` on `OrderLine` |
+| Aggregate loaded and stored as a whole | Factory methods call factory methods. The root's `Fetch` calls the child list's `Fetch`, which calls each child's. The root's `Insert` or `Update` calls the child list's `Save`, which routes each child to its own `Insert`, `Update` or `Delete`. | DDD gives this job to the repository and does not name the mechanism. Here each object reads and writes only its own row and hands the rest to the next factory, so no method knows the whole graph, and only the first call crosses. | `Order.Insert` → `OrderLineList.Update` → `OrderLine.Insert` |
 | Child collection | A `[Factory]` list the root holds. It tracks removed items and runs the save cascade. | Someone must decide insert, update or delete for each child. The list knows what was added and removed, so the root does not map its children's rows. | `OrderLineList` |
 | Value object | A `record`. No `[Factory]` unless its construction needs a service or authorization. | An immutable value needs no lifecycle, so it crosses as plain data. A factory appears only when building it needs the server. | `ValueObjects/Money.cs` (plain), `ValueObjects/TaxRate.cs` (factory) |
 | Factory | The generated `IXxxFactory`. Nothing with `[Factory]` is built with `new`. | The factory is where services are injected, authorization is checked and the call is routed to a tier. `new` would skip all three. | every Design type |
@@ -67,4 +69,9 @@ The reader is assumed to know DDD. Nothing here explains a concept.
 
 ### Confirmation
 
-*Pending.*
+**2026-11-13, Keith:** "It's all very good." Two corrections, both applied to section 1:
+
+- Root and child are not a clear-cut pair of definitions. One entity can be either, and the difference is the factory method's parameters, which the author chooses. The two rows became three: the entity, and its two roles.
+- The save cascade needed its own row and a statement of the idea behind it: factory methods call factory methods.
+
+Questions 2 and 3 were not answered separately; "all very good" is taken to cover them. The wording of the two changed rows is still open until Keith has read it.
