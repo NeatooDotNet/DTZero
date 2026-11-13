@@ -43,7 +43,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 |---|------|-------|--------|--------|----|
 | 001 | [001-verdict](./plans/001-verdict.md) | The verdict: is DTZero useful to others | AC-1 | Done | #41 |
 | 002 | [002-ddd-map](./plans/002-ddd-map.md) | Map DDD concepts to DTZero components | AC-2 | Done | #42 |
-| 003 | [003-readme](./plans/003-readme.md) | Rewrite the README around the case | AC-3, AC-7 | Draft | — |
+| 003 | [003-readme](./plans/003-readme.md) | Rewrite the README around the case | AC-3, AC-7 | In Progress | — |
 | 004 | [004-narrative-docs](./plans/004-narrative-docs.md) | Narrative docs carry the why | AC-4, AC-7 | Draft | — |
 | 005 | [005-component-docs](./plans/005-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Draft | — |
 | 006 | [006-skill](./plans/006-skill.md) | The skill carries the same reasons | AC-5, AC-7 | Draft | — |
