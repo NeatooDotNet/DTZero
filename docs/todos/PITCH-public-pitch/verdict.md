@@ -12,6 +12,9 @@ The README's lead claim, "zero boilerplate", is the claim AI has weakened most. 
 
 - **DTOs and controllers were a workaround for a language boundary.** The browser ran JavaScript, so the domain could not go there. With .NET on both tiers that boundary is gone, and doing it the old way is a habit, not a need.
 - **The domain is defined once, runs on both tiers, and the compiler checks the seam.**
+- **A public API reuses the same graph.** The pattern seen over twenty-five years: the application can do everything, the API a limited set, and the application's logic ends up written a second time against the API's DTOs. With DTZero an API endpoint on the server calls the same factories and the same domain objects, so there is one copy of the logic (Keith, 2026-11-13).
+
+The positioning that follows is not "if you already use WebAssembly, here is a library". It is "this is a reason to choose WebAssembly".
 
 ## 2. What it saved in one production application
 
@@ -55,7 +58,7 @@ A team that has all of these:
 
 ## 4. Who should not use it
 
-- **Anyone with a non-.NET client**, or a public API that others consume. DTZero's endpoint is not a contract anyone else can call.
+- **Anyone whose only client is not .NET.** DTZero's endpoint is not a contract anyone else can call. It is for the application. A public API beside the application is a different matter: its endpoints are hand-written, as they should be for a contract, and they call the same domain graph on the server.
 - **Blazor Server only.** There is no wire to cross.
 - **Thin CRUD over tables.** With no behaviour to share, minimal APIs and a generated client are simpler and familiar to everyone.
 - **Teams that version the client and the server separately.** (To confirm with the user: section 8, question 2.)
@@ -136,6 +139,14 @@ Each of these needs an answer in the docs, or an admission.
 
 - "Teams that want persistence out of the entity" is struck from section 4. The transferred graph is the DDD conceptual graph, not the EF model, as in CSLA.
 - The niche is the client technology: Blazor WebAssembly and WPF. Inside it the argument is "why do it the old way, as when we were stuck with JavaScript". R1 is reworded to lead with it.
+
+**2026-11-13, Keith, second:**
+
+- The README and docs must walk a sceptical reader through the objections in the order this verdict's own author raised them and was corrected: persistence in the entity, "only a niche", "DTOs do more". The author not seeing the value at first is the evidence that the current pages do not carry it.
+- Positioning is "another reason to use WebAssembly", not "a library for those who already do". It is for applications; that is not in doubt.
+- The public-API claim joins the pitch (section 1, third bullet).
+
+**Gap this opens:** no page and no Design sample shows an API endpoint calling a factory on the server (checked 2026-11-13: the only `Map*` call in `src/` is the library's own endpoint). The claim needs a Design region and a test that pins it before the README makes it. PITCH-003 or PITCH-004 carries that.
 
 Question 1 (the rest of R1 to R5) and questions 2 and 3 remain open. Question 4 is answered for Blazor WebAssembly and WPF; MAUI is not confirmed.
 
