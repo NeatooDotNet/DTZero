@@ -1,6 +1,6 @@
 # Verdict: Is DTZero Useful to Anyone Else?
 
-**Plan:** PITCH-001 · **Written:** 2026-11-13 by Claude · **Ruling:** pending (section 8)
+**Plan:** PITCH-001 · **Written:** 2026-11-13 by Claude · **Ruling:** ruled 2026-11-13 (section 8)
 
 ## 1. Short answer
 
@@ -161,6 +161,10 @@ Each of these needs an answer in the docs, or an admission.
 It is also most of the answer to tampering (section 7, item 2). One caution for the docs: a target rule that reads state from the object the client sent is checking input. The page's own example refuses a write when `Status` is `Locked`; a hostile caller sends a different status. Because the auth class has injection, it can read the stored record instead, and the page should show that.
 
 **2026-11-13, Keith, fifth:** the authorization examples take the user by constructor (Design's `AuthorizedOrderAuth` already takes `ICurrentUser`), and the docs add a second step: a base authorization class, shared by every auth class, that holds the broad read and write check. The generator gathers auth methods with `GetMethodsRecursive`, so inherited methods look supported, but no Design sample or test pins it (checked 2026-11-13). The sample and its test come before the page shows it. PITCH-005 carries this.
+
+**2026-11-13, Keith, sixth, closing question 3:** the rules of a Neatoo object do not run again automatically when it reaches the server, mainly because of task and non-task rules. Re-running them is good practice and today means a block of code in each write method. That is a gap in Neatoo, to be closed by an elegant mechanism or an option there; it is parked, not this todo's work. DTZero's documentation is about DTZero, so it says only this: what the client sends is input, authorization decides who may write which record, and a check the server must be sure of runs in the server's operation.
+
+**The verdict is ruled.** Sections 1 to 7 stand as amended by the six entries above; R1 to R5 are accepted with R1 and R2 reworded. AC-1 is met.
 
 Superseded note, kept for the record: Question 1 (the rest of R1 to R5) and questions 2 and 3 remain open. Question 4 is answered for Blazor WebAssembly and WPF; MAUI is not confirmed.
 

@@ -4,7 +4,7 @@
 **Date:** 2026-11-13
 **Related Todo:** [../todo.md](../todo.md)
 **Serves:** AC-1
-**Status:** In Progress
+**Status:** Done
 **Last Updated:** 2026-11-13
 **Plan-review opt-in:** No (a document the user rules on directly)
 **Code-review opt-in:** No (no code)
@@ -55,10 +55,10 @@ Write an evidence-based verdict on whether DTZero is worth another team's adopti
 
 ## Acceptance
 
-- [ ] `verdict.md` names the audience, the alternatives and the value under AI-assisted development `[explicit-skip: document]`
-- [ ] Every number cites its command and every outside fact cites a URL `[explicit-skip: document]`
-- [ ] The verdict names who should not use DTZero `[explicit-skip: document]`
-- [ ] The user's ruling is recorded in the verdict `[explicit-skip: document]`
+- [x] `verdict.md` names the audience, the alternatives and the value under AI-assisted development `[explicit-skip: document]`
+- [x] Every number cites its command and every outside fact cites a URL `[explicit-skip: document]`
+- [x] The verdict names who should not use DTZero `[explicit-skip: document]`
+- [x] The user's ruling is recorded in the verdict `[explicit-skip: document]`
 
 ---
 
@@ -81,6 +81,8 @@ Not applicable: no behavioral bullets. The Step 5 test review is skipped and rec
 ---
 
 ## Gate Record
+
+- 2026-11-13: test review skipped (document-only plan); the user ruled on the verdict in six entries — Done
 
 ---
 
