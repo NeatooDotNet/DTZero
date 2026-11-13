@@ -20,7 +20,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 ## Acceptance Criteria
 
 - [x] **AC-1** · Required — A written verdict names DTZero's audience, its alternatives and its value in AI-assisted development, and the user has ruled on it.
-- [ ] **AC-2** · Required — A map ties each DDD concept to a DTZero component or marks it as not DTZero's job, and the user has confirmed it.
+- [x] **AC-2** · Required — A map ties each DDD concept to a DTZero component or marks it as not DTZero's job, and the user has confirmed it.
 - [ ] **AC-3** · Required — The README states the problem, the audience and when not to use DTZero before any code.
 - [ ] **AC-4** · Required — Every docs page says why its component exists and when to leave it out.
 - [ ] **AC-5** · Required — The skill carries the same reasons as the docs.
@@ -42,7 +42,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 | # | File | Title (≤ 8 words) | Serves | Status | PR |
 |---|------|-------|--------|--------|----|
 | 001 | [001-verdict](./plans/001-verdict.md) | The verdict: is DTZero useful to others | AC-1 | Done | #41 |
-| 002 | [002-ddd-map](./plans/002-ddd-map.md) | Map DDD concepts to DTZero components | AC-2 | In Progress | — |
+| 002 | [002-ddd-map](./plans/002-ddd-map.md) | Map DDD concepts to DTZero components | AC-2 | Done | — |
 | 003 | [003-readme](./plans/003-readme.md) | Rewrite the README around the case | AC-3, AC-7 | Draft | — |
 | 004 | [004-narrative-docs](./plans/004-narrative-docs.md) | Narrative docs carry the why | AC-4, AC-7 | Draft | — |
 | 005 | [005-component-docs](./plans/005-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Draft | — |

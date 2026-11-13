@@ -4,7 +4,7 @@
 **Date:** 2026-11-13
 **Related Todo:** [../todo.md](../todo.md)
 **Serves:** AC-2
-**Status:** In Progress
+**Status:** Done
 **Last Updated:** 2026-11-13
 **Plan-review opt-in:** No (a document the user confirms directly)
 **Code-review opt-in:** No (no code)
@@ -79,6 +79,8 @@ Not applicable: no behavioral bullets. The Step 5 test review is skipped and rec
 ---
 
 ## Gate Record
+
+Document-only plan; Step 5 test review skipped (todo, Skipped Steps). The gate was the user's confirmation, given 2026-11-13 in two rounds and recorded in `ddd-map.md` section 4.
 
 ---
 
