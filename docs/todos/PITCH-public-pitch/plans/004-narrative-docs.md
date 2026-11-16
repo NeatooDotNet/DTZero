@@ -9,7 +9,7 @@
 **Plan-review opt-in:** No (prose the user reads in the PR)
 **Code-review opt-in:** No (no code)
 **Branch:** `PITCH-004-narrative-docs`
-**PR:** —
+**PR:** #44
 
 ---
 
