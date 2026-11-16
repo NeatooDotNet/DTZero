@@ -109,6 +109,25 @@ internal static class DiagnosticDescriptors
         description: "The generated factory calls each [AuthorizeFactory] check on the auth type named by [AuthorizeFactory<T>]. When T is a class that implements the check's interface method explicitly (or carries [AuthorizeFactory] on the explicit implementation itself), or leaves it to a default interface implementation, the check is not a member of T and cannot be called through it. Implement the method implicitly as a public method of T, or name the interface as the auth type.");
 
     /// <summary>
+    /// NF0109: The operations an in-source <c>[AuthorizeFactory(...)]</c> declaration names could
+    /// not be read from its bound attribute constant.
+    /// </summary>
+    /// <remarks>
+    /// Operations are read from the bound constant, so a <c>using</c> alias, a <c>const</c> or a cast
+    /// reads like <c>AuthorizeFactoryOperation.X</c>. When even that cannot be read (an argument that
+    /// does not bind to a constant), the check's operations are unknown: no check is generated from the
+    /// declaration and the build fails, because the operations it names would otherwise go unchecked.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor AuthCheckOperationsNotReadable = new(
+        id: "NF0109",
+        title: "Authorization check operations could not be read",
+        messageFormat: "The operations of authorization check '{2}' declared on '{1}' (auth type '{0}') could not be read, so the check cannot be generated. Pass a constant AuthorizeFactoryOperation value to [AuthorizeFactory(...)].",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The generator reads the operations of each [AuthorizeFactory(...)] declaration from its bound attribute constant. If the argument does not bind to a constant AuthorizeFactoryOperation value, the operations cannot be known, and generating the check without them would leave those operations unchecked.");
+
+    /// <summary>
     /// NF0104: Hint name truncated due to length limit.
     /// </summary>
     public static readonly DiagnosticDescriptor HintNameTruncated = new(

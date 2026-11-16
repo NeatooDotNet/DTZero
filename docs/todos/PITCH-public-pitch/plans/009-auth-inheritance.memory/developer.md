@@ -18,6 +18,8 @@ Current step: Implementation complete, both solutions green; awaiting test revie
 
 - Fourth pass (user ruling): restated checks COMBINE operations (union), never narrow. GetAuthMethodsRecursive groups declarations by nullable-insensitive signature (FullyQualifiedFormat), representative = most-derived declaration in source, others in `restatements`. [Remote] on any declaration -> combined check remote (OR, as the builder already ORs IsRemote across auth methods). Metadata restatement -> NF0107 unless source union covers every factory operation it names (Read covers Create, Fetch AND Execute). Callability (NF0108) now checked before grouping. Logs `009-impl4-*.log`: Unit 895, Integration 690/5, Design 187/1; pre-existing generated output byte-identical.
 
+- Fifth pass: operations read from the bound attribute constant (`ReadAuthorizeOperations(AttributeData)`) for every declaration; regex `ParseAuthorizeOperations` deleted. Unreadable in-source declaration -> NF0109 Error at that attribute. [Remote] combination untouched (user deciding). Alias integration target lives in its own file `AuthAliasTargets.cs` because the generator copies a target file's usings into its generated factories. Logs `009-impl5-*.log`: Unit 901, Integration 691/5, Design 187/1; pre-existing and pass-4 generated output byte-identical.
+
 ## Mistakes to Avoid
 - Coverage fixtures: `Read` applies to Execute operations too (FactoryOperation.Execute = Read | Execute).
 - Asserting zero errors on `RunGenerator` output compilation (see above).

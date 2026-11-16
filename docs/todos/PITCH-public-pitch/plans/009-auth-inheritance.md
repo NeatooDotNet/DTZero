@@ -90,7 +90,7 @@ Make the generator honor authorization checks an auth type inherits. This is the
 
 ## Test Evidence
 
-Logs of the final state: `reviews/009-impl4-build.log`, `reviews/009-impl4-test.log`. UnitTests 871 to 895, IntegrationTests 664 to 690 (5 skipped), Design.Tests 187 unchanged, per framework. Integration tests are in `src/Tests/DTZero.IntegrationTests/Authorization/AuthInheritanceTests.cs` on the client/server containers; unit tests are under `src/Tests/DTZero.UnitTests`.
+Logs of the final state: `reviews/009-impl5-build.log`, `reviews/009-impl5-test.log`. UnitTests 871 to 901, IntegrationTests 664 to 691 (5 skipped), Design.Tests 187 unchanged, per framework. Integration tests are in `src/Tests/DTZero.IntegrationTests/Authorization/AuthInheritanceTests.cs` on the client/server containers; unit tests are under `src/Tests/DTZero.UnitTests`.
 
 | Acceptance bullet | Test | Tier |
 |---|---|---|
@@ -115,6 +115,11 @@ Also added: interface-factory and static-factory coverage, and `InheritedAuthEmi
   - Callout 1 (two unrelated interfaces on a class auth type, one set of operations dropped): fixed by Step 7.
   - Callout 2 (release notes missed an auth type in a referenced assembly, and a concrete base whose override now runs): release notes corrected.
   - Theoretical, taken anyway: the check key ignores nullable reference annotations.
+- Test review round 2, 2026-11-16: APPROVED, no veto-tier finding, no callout.
+- Code review second pass, 2026-11-16: APPROVED, three callouts on AC-4.
+  - Callout 1 (operations written through an alias, a constant or a cast were not read on a restated declaration): fixed. Operations are read from the bound attribute value; an unreadable one is error NF0109. Pinned by `RestatedCheck_NonRepresentativeOperationsThrough*_JoinTheUnion` and `Union_BaseDeclarationNamesItsOperationThroughAlias_BothOperationsEnforced_OnceEach`. Logs `reviews/009-impl5-*.log`.
+  - Callout 2 (declarations of one check that disagree on `[Remote]`): put to Keith; see Plan Amendments.
+  - Callout 3 (release notes said "No API change"): release notes corrected; a guarded factory method can become asynchronous.
 
 ---
 

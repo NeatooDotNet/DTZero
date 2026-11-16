@@ -66,3 +66,104 @@ All other release-note claims match the code:
   - `verdict.md:163` (the fifth ruling).
   - Release-notes nav_order values.
 - Named but unused: `src/Design/CLAUDE-DESIGN.md`. The plan adds no Design sample, and nothing turned on it.
+
+---
+
+## Code Review — PITCH-009 — [2026-11-16] — Second pass (at `6259450`)
+
+**Verdict: APPROVED**
+**Logs:** build PASSED. Both solutions built with 0 errors. The 2 warnings are the OrderEntry.BlazorClient WASM native-reference warnings (`reviews/009-impl4-build.log`). Tests: 0 failed. UnitTests 895/895, IntegrationTests 690 passed / 5 skipped, Design.Tests 187 passed / 1 skipped, the same on net9.0 and net10.0 (`reviews/009-impl4-test.log`).
+- The deltas match the diff. +6 unit tests: NF0107 +2, `RestatedCheck_*` +4. +4 integration tests: the `Union_*` tests.
+- The logs were written at 12:49 and `6259450` was committed at 12:50:52. They are accepted as the final state, as in the first pass.
+
+### Direction & shape
+The ruling is implemented at the same seam as before. `GetAuthMethodsRecursive` (`FactoryGenerator.Transform.cs:106`) now groups the `[AuthorizeFactory]` declarations of one check by signature (`:137-150`). It returns one representative per group: the most-derived declaration in source (`:220`). The other declarations go back in `restatements` (`:222`).
+
+`TypeAuthMethods` then works on each group:
+- It ORs the operations of the in-source declarations into the representative's operations (`:677-702`).
+- It marks the check `[Remote]` if any declaration carries `[Remote]` (`:686`, `:747-750`).
+- It raises NF0107 for a declaration with no source syntax, unless the in-source union covers it (`:706-715`).
+
+The callability test (NF0108) now runs before grouping (`:190-203`), so a check that cannot be called never joins a group. `MarkRemote` (`Types.cs:706`) changes the record before it is stored, so caching is unaffected.
+
+Sacred tests: `git diff --name-status f057499..HEAD -- src/Tests` shows only `DiagnosticTestHelper.cs` modified, and it is additive. The three tests that changed between `bfd7434` and `6259450` were all written earlier in this plan. Each change has a justification line in Plan Amendments, so none of them was weakened without a word.
+
+**Q1: the Decision case and Callout 1.** Both are closed for the shapes they named.
+- Class restating an interface check: `Union_ClassRestatesInterfaceCheck_*` and `ImplementedInterface_ClassRestatement_CombinesOperations_RefusesBoth`.
+- Derived interface restating a base interface check: `Union_DerivedInterfaceRestatesBaseInterfaceCheck_*`.
+- Override restated for another operation: `Union_OverrideRestatedWithAnotherOperation_*`.
+- `new` member: `RestatedCheck_GeneratesAsOneDeclarationNamingTheUnionOfOperations`, variant `newMemberRestated`.
+- Sibling interfaces on a class auth type: `Union_ClassImplementsTwoUnrelatedInterfacesDeclaringTheCheck_*`.
+
+One residual path remains (Callout 1 below): an operation named by an in-source declaration can still end up with no check and no diagnostic.
+
+**Q2: a declaration in a referenced assembly.** I found no path where a referenced declaration's operation is neither enforced nor reported.
+- If no declaration of the check is in source, every declaration is reported (`:650-654`, and `:784-788` for an auth type that is itself referenced).
+- If a referenced declaration is grouped with in-source ones, it is reported unless `CoversEveryOperation` holds. That test uses the same `&` matching that assigns checks to factory methods (`Types.cs:629`). The six `FactoryOperation` values are the whole enum.
+- When the test holds, the covered operations are checked by the same call, so they are enforced.
+- `ReadAuthorizeOperations` can return null: the attribute has one constructor, taking an int-backed enum (`FactoryAttributes.cs:155`), so a null only arises when the argument cannot be read. A null is reported, not skipped.
+- `[Remote]` on a referenced declaration is still ORed in (`:686` runs before the syntax test).
+
+**Q3: `[Remote]` combination.** This cannot make a check weaker. A remote check runs on the server, and the renderer guards a remote method as server-only (`isServerOnly: IsInternal || IsRemote`, `ClassFactoryRenderer.cs:420` and the equivalents).
+
+It does move work that used to run locally. For every operation of the combined check, the factory method becomes remote and `Task`-returning (`FactoryModelBuilder.cs:351-357`), and its `Can*` asks the server (`:820-822`, `:930-943`). That covers the operations named only by a non-`[Remote]` restatement too. See Callout 2.
+
+`IsInternal` comes from the representative alone (`Types.cs:728`). That matters only when a `new` member changes accessibility (see Theoretical).
+
+**Q4: the signature key.** `SymbolDisplayFormat.FullyQualifiedFormat` lacks `IncludeNullableReferenceTypeModifier`. The generator's own `FullyQualifiedFormatWithNullable` (`Types.cs:35-38`) exists to add that option. So `string?` and `string`, and nested annotations such as `List<string?>`, now share a key. `int?` stays distinct, and `RestatedCheck_DifferingOnlyInNullableAnnotation_IsOneCheck` pins this.
+- Apart from that annotation, `FullyQualifiedFormat` qualifies at least as much as the default format did. So this commit introduces no new collapse and no new split.
+- The key still leaves out ref-kind and method arity, which is unchanged from `bfd7434` (see Theoretical).
+
+**Q5: Callout 2.**
+- Shape (a), an auth type in a referenced assembly, is closed (`v2.0.1.md:52`).
+- Shape (b), a concrete base with an overriding derived class, is closed (`:53`).
+- The sentence at `:42` is now scoped to "declared in the project".
+- The Overview sentence at `:17`, which the first pass flagged as broader than the facts, is unchanged.
+- One claim the first pass did not test, "No API change" (`:13`, `:27`), does not hold. See Callout 3.
+- These claims match the code: the restated-check bullet (`:35`), subject to Callout 1; the referenced auth type remedy (`:52`), which `CoversEveryOperation` makes true; and Known Limits (`:58`), where an interface auth type inheriting from two bases gives an ambiguous call and a class auth type gets the union.
+
+### Veto-tier
+None.
+
+### Callouts
+1. `FactoryGenerator.Transform.cs:698-701` (against `:672`), High. `Affects: AC-4` (plan Acceptance: "runs for the operations of every declaration"). `Reachable by:` a restated check where a declaration that is not the representative writes its operations in a form the regex `AuthorizeFactoryOperation\.(\w+)` cannot read.
+   - Examples: a base `[AuthorizeFactory(Op.Fetch)]` under `using Op = DTZero.AuthorizeFactoryOperation;`, a `const AuthorizeFactoryOperation` field, or a cast. Then a derived type restates the check as `[AuthorizeFactory(AuthorizeFactoryOperation.Create)]`.
+   - `ParseAuthorizeOperations` returns an empty list for that declaration. It adds nothing to the union, and nothing reports it, so Fetch goes unchecked.
+   - The same form on the representative makes `Aggregate` throw, so no factory is generated and the build fails loudly.
+   - So this is the one remaining shape where an in-source declaration's operation is silently lost. A base declaration in that form was never read before this plan, so a project can already contain one.
+   - One option: `ReadAuthorizeOperations` (`:240`), which reads the bound constant, already exists and would read any form.
+2. `FactoryGenerator.Transform.cs:686`, `:747-750`, with `FactoryModelBuilder.cs:351-357`, `:820-822`. High. `Affects: AC-4` (plan Intent: "Authorization that works today keeps working, with the same generated behavior"). `Reachable by:` upgrading a project in which one declaration of a check carries `[Remote]` and a restatement that names other operations does not.
+   - Example: a concrete base auth class with `[Remote][AuthorizeFactory(Fetch)] public virtual bool CanX(...)`, and a derived class overriding it with `[AuthorizeFactory(Create)]` only.
+   - At v2.0.0 the derived check ran alone for Create, locally and synchronously.
+   - Now the combined check is `[Remote]`. The local `Create` becomes a remote, `Task`-returning factory method whose body runs on the server, and `CanCreate` asks the server.
+   - The same happens when a class restates an interface's `[Remote]` check without `[Remote]`. The check is never weaker. What changes: a local root `Create` moves to the server, which is against what the restating declaration says (VisionAlignment D14 makes a root Create local by default). Call sites may stop compiling, and a check that reads client-side state now reads the server's.
+   - Plan Amendments record the OR rule. The user's ruling covered operations, not remoteness.
+   - One option: emit a check per declaration for the operations only that declaration names, keeping each declaration's `[Remote]`.
+3. `docs/release-notes/v2.0.1.md:13`, `:27`, `:40-53`. High. `Affects: AC-4`. `Reachable by:` upgrading with an inherited check that returns `Task<bool>`/`Task<string>` or carries `[Remote]`, and that applies to a factory operation that was synchronous because the check was dropped.
+   - "No API change" does not hold for that project. The newly enforced check makes the factory method and its `Can*` `Task`-returning (`FactoryModelBuilder.cs:354-357`, `:822`), and a `[Remote]` check also makes them remote. The generated factory interface changes signature, and callers that used the result synchronously stop compiling.
+   - This was true at `bfd7434` as well. Callout 2's shape adds a case that worked at v2.0.0.
+   - Neither appears under "Who is affected".
+   - The Overview at `:17` still says an inherited check "was not enforced". That is broader than the facts, given that `:53` now says a concrete base's check ran.
+
+### Could not verify
+- Callouts 1 and 2 at runtime. Both were traced through the transform and the model builder, not executed.
+  - `RestatedCheck_RemoteOnAnyDeclaration_MakesTheCombinedCheckRemote` pins the generated code for a class restating an interface's `[Remote]` check.
+  - No test covers the concrete-base override shape or a `Create` that becomes `Task`-returning.
+- No test-review round covers the impl4 tests. `009-test-review.md` has Round 1 only, at impl3. I read the changed and added tests where a finding or a closure depended on them.
+- The amendment's claim that pre-existing output is byte-identical. It is the implementer's report, with no snapshot artifact. The cover is that every pre-existing test passes unchanged.
+
+### Theoretical (not triaged)
+- A `new` member hiding an inherited check takes over the hidden declaration's operations, and the hidden implementation never runs. The same goes for an interface implemented by a base-class method that a derived `new` member hides. Because `IsInternal` comes from the representative, a `public new` over an `internal` check also drops the server-only guard on the hidden declaration's operations.
+- The signature key ignores ref-kind and method arity (unchanged from `bfd7434`). So `CanX(int)` and `CanX(ref int)`, or `CanX<T>(string)` and `CanX(string)`, would collapse into one check. An `object`/`dynamic` override, or differing tuple names on a `new` member, would split into two checks: the check runs twice and no operation is lost.
+- With default metadata import, a non-public `[AuthorizeFactory]` member of a referenced base is not visible, so it is neither enforced nor reported. It would not be callable anyway, unless InternalsVisibleTo applies.
+
+### Read report
+- Read beyond the brief:
+  - `FactoryGenerator.Types.cs:35-38`, `:600-839`.
+  - `FactoryModelBuilder.cs:340-380`, `:800-950`.
+  - A grep of `IsRemote`/`IsInternal` across the generator.
+  - `AuthorizeFactoryOperation.cs` and `FactoryOperation.cs`.
+  - `FactoryAttributes.cs` (attribute usage and constructor).
+  - `Design.Domain/Aggregates/AuthorizedOrderAuth.cs` and `AuthorizedOrder.cs` comments on `[Remote]` auth.
+  - The test diff `bfd7434..HEAD`, `009-test-review.md`, and `todo.md` (ACs, Dismissed, Parked).
+- Named but unused: none.

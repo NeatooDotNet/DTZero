@@ -327,6 +327,102 @@ using System.Threading.Tasks;
         Assert.Equal(expected, GeneratedFactory(siblingInterfaces, "TargetFactory"));
     }
 
+    // ------------------------------------------------------------------------
+    // Operations are read from the bound attribute constant, so every form an
+    // argument can take counts. Before, they were read from the argument's text:
+    // on a restated (non-representative) declaration an alias, a const or a cast
+    // contributed nothing, and on a sole declaration the alias threw.
+    // ------------------------------------------------------------------------
+
+    private const string AliasUsing = "using Op = DTZero.AuthorizeFactoryOperation;\n";
+
+    private const string OpsConstants = @"
+    public static class Ops
+    {
+        public const AuthorizeFactoryOperation FetchOp = AuthorizeFactoryOperation.Fetch;
+    }
+";
+
+    /// <summary>
+    /// The interface declares the check for Fetch in the given form; the class restates it for
+    /// Create, so the class's declaration is the representative and the interface's is not.
+    /// </summary>
+    private static string RestatedWithInterfaceForm(string fetchArgument, string extraDeclarations = "") => Fixture(extraDeclarations + @"
+    public interface IChecks
+    {
+        [AuthorizeFactory(" + fetchArgument + @")]
+        bool CanRead(string key);
+    }
+    public class Auth : IChecks
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+    private static string UnionDeclaredOnce(string extraDeclarations = "") => Fixture(extraDeclarations + @"
+    public class Auth
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create | AuthorizeFactoryOperation.Fetch)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+    [Fact]
+    public void RestatedCheck_NonRepresentativeOperationsThroughUsingAlias_JoinTheUnion()
+    {
+        var expected = GeneratedFactory(AliasUsing + UnionDeclaredOnce(), "TargetFactory");
+        var actual = GeneratedFactory(AliasUsing + RestatedWithInterfaceForm("Op.Fetch"), "TargetFactory");
+
+        Assert.Contains("authorized = auth.CanRead(key);", expected);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void RestatedCheck_NonRepresentativeOperationsThroughConst_JoinTheUnion()
+    {
+        var expected = GeneratedFactory(UnionDeclaredOnce(OpsConstants), "TargetFactory");
+        var actual = GeneratedFactory(RestatedWithInterfaceForm("Ops.FetchOp", OpsConstants), "TargetFactory");
+
+        Assert.Contains("authorized = auth.CanRead(key);", expected);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void RestatedCheck_NonRepresentativeOperationsThroughCast_JoinTheUnion()
+    {
+        var expected = GeneratedFactory(UnionDeclaredOnce(), "TargetFactory");
+        var actual = GeneratedFactory(RestatedWithInterfaceForm("(AuthorizeFactoryOperation)2"), "TargetFactory");
+
+        Assert.Contains("authorized = auth.CanRead(key);", expected);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void SoleDeclaration_OperationsThroughUsingAlias_GeneratesAsTheNamedOperation()
+    {
+        var declared = AliasUsing + Fixture(@"
+    public class Auth
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var aliased = AliasUsing + Fixture(@"
+    public class Auth
+    {
+        [AuthorizeFactory(Op.Read)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var expected = GeneratedFactory(declared, "TargetFactory");
+
+        Assert.Contains("authorized = auth.CanRead(key);", expected);
+        Assert.Equal(expected, GeneratedFactory(aliased, "TargetFactory"));
+    }
+
     [Fact]
     public void RestatedCheck_DerivedInterfaceRestatesBaseInterface_GeneratesAsOneDeclarationNamingTheUnion()
     {

@@ -450,6 +450,20 @@ public class AuthInheritanceTests
     }
 
     [Fact]
+    public async Task Union_BaseDeclarationNamesItsOperationThroughAlias_BothOperationsEnforced_OnceEach()
+    {
+        var (client, server, _) = Scopes();
+        var factory = client.ServiceProvider.GetRequiredService<IAliasedCheckTargetFactory>();
+
+        // The base declares the check as [AuthorizeFactory(Op.Fetch)] with a using alias; the
+        // override restates it for Create. Fetch must stay checked.
+        await AssertUnionEnforced(client, server,
+            async key => await factory.Fetch(key),
+            key => factory.Create(key),
+            "AliasedDerivedAuth.CanAliased");
+    }
+
+    [Fact]
     public async Task Union_ClassImplementsTwoUnrelatedInterfacesDeclaringTheCheck_BothOperationsEnforced_OnceEach()
     {
         var (client, server, _) = Scopes();

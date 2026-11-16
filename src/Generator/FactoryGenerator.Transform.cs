@@ -234,13 +234,24 @@ public partial class Factory
 		$"{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)))})";
 
 	/// <summary>
-	/// The operations an <c>[AuthorizeFactory]</c> declaration names, read from its attribute data.
-	/// Used for declarations that may have no source syntax; null when it cannot be read.
+	/// The operations an <c>[AuthorizeFactory]</c> declaration names, read from its bound attribute
+	/// constant: the source of truth for every declaration, in source or referenced, whatever form
+	/// the argument is written in (<c>AuthorizeFactoryOperation.X</c>, a <c>using</c> alias, a
+	/// <c>const</c>, a cast). Null when it cannot be read, which the caller reports (NF0109, or NF0107
+	/// for a declaration not in source).
 	/// </summary>
-	private static AuthorizeFactoryOperation? ReadAuthorizeOperations(IMethodSymbol method)
+	private static AuthorizeFactoryOperation? ReadAuthorizeOperations(IMethodSymbol method) =>
+		ReadAuthorizeOperations(method.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name == "AuthorizeFactoryAttribute"));
+
+	private static AuthorizeFactoryOperation? ReadAuthorizeOperations(AttributeData? attribute)
 	{
-		var attribute = method.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name == "AuthorizeFactoryAttribute");
-		return attribute?.ConstructorArguments.FirstOrDefault().Value is int value
+		if (attribute == null || attribute.ConstructorArguments.Length != 1)
+		{
+			return null;
+		}
+
+		var argument = attribute.ConstructorArguments[0];
+		return argument.Kind != TypedConstantKind.Error && argument.Value is int value
 			? (AuthorizeFactoryOperation)value
 			: null;
 	}
@@ -258,36 +269,6 @@ public partial class Factory
 		];
 
 		return operations.All(o => ((int)named & (int)o) == 0 || ((int)covering & (int)o) != 0);
-	}
-
-	/// <summary>
-	/// The operations named in an <c>[AuthorizeFactory(...)]</c> attribute's source text, as the
-	/// generator has always read them (<c>AuthorizeFactoryOperation.X</c> names).
-	/// </summary>
-	private static List<AuthorizeFactoryOperation> ParseAuthorizeOperations(AttributeSyntax attributeSyntax)
-	{
-		var attr = attributeSyntax.ArgumentList?.Arguments.ToFullString();
-
-		var pattern = @"AuthorizeFactoryOperation\.(\w+)";
-
-		// Use Regex.Matches to find all matches in the attr string
-		var matches = Regex.Matches(attr, pattern);
-		var authorizeOperationList = new List<AuthorizeFactoryOperation>();
-
-		foreach (Match match in matches)
-		{
-			// Extract the matched value (e.g., "Read", "Write")
-			var value = match.Groups[1].Value;
-
-			// Try to parse the value into the AuthorizeFactoryOperation enum
-			if (Enum.TryParse<AuthorizeFactoryOperation>(value, out var dmType))
-			{
-				// Successfully parsed the value into the AuthorizeFactoryOperation enum
-				authorizeOperationList.Add(dmType);
-			}
-		}
-
-		return authorizeOperationList;
 	}
 
 	private static bool HasRemoteAttribute(IMethodSymbol method) =>
@@ -571,14 +552,14 @@ public partial class Factory
 			var reportLocation = authorizeAttribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()
 				?? typeSymbol.Locations.FirstOrDefault(l => l.IsInSource);
 
-			void ReportAtAuthorizeFactory(string diagnosticId, params string[] args)
+			void ReportAt(Location? location, string diagnosticId, params string[] args)
 			{
-				if (reportLocation == null)
+				if (location == null)
 				{
 					return;
 				}
 
-				var lineSpan = reportLocation.GetLineSpan();
+				var lineSpan = location.GetLineSpan();
 				diagnostics.Add(new DiagnosticInfo(
 					diagnosticId,
 					lineSpan.Path ?? "",
@@ -586,9 +567,21 @@ public partial class Factory
 					lineSpan.StartLinePosition.Character,
 					lineSpan.EndLinePosition.Line,
 					lineSpan.EndLinePosition.Character,
-					reportLocation.SourceSpan.Start,
-					reportLocation.SourceSpan.Length,
+					location.SourceSpan.Start,
+					location.SourceSpan.Length,
 					args));
+			}
+
+			void ReportAtAuthorizeFactory(string diagnosticId, params string[] args) =>
+				ReportAt(reportLocation, diagnosticId, args);
+
+			// NF0109: the operations of an in-source [AuthorizeFactory] declaration could not be read
+			// from its bound constant. Reported at that declaration's attribute; no check is generated
+			// from it, and the build fails rather than leaving its operations unchecked.
+			void ReportOperationsNotReadable(IMethodSymbol methodSymbol, Location attributeLocation)
+			{
+				messages.Add($"NF0109: operations of {methodSymbol.ContainingType.Name}.{methodSymbol.Name} could not be read");
+				ReportAt(attributeLocation, "NF0109", authTypeName, methodSymbol.ContainingType.ToDisplayString(), methodSymbol.Name);
 			}
 
 			void ReportCheckNotInSource(IMethodSymbol methodSymbol)
@@ -669,7 +662,16 @@ public partial class Factory
 								continue;
 							}
 
-							var authorizeFactoryOperation = ParseAuthorizeOperations(attributeSyntax).Aggregate((a, b) => a | b);
+							// Read from the bound attribute constant, not the argument's text, so an alias, a
+							// const or a cast reads as reliably as AuthorizeFactoryOperation.X.
+							var representativeOperations = ReadAuthorizeOperations(attribute);
+							if (representativeOperations == null)
+							{
+								ReportOperationsNotReadable(methodSymbol, attributeSyntax.GetLocation());
+								continue;
+							}
+
+							var authorizeFactoryOperation = representativeOperations.Value;
 							var isRemoteByRestatement = false;
 
 							// The same check declared elsewhere in the hierarchy: one call, for the union of
@@ -695,10 +697,15 @@ public partial class Factory
 										continue;
 									}
 
-									foreach (var operation in ParseAuthorizeOperations(otherSyntax))
+									var otherOperations = ReadAuthorizeOperations(other);
+									if (otherOperations == null)
 									{
-										authorizeFactoryOperation |= operation;
+										// Never a silent zero: operations nobody can read would go unchecked.
+										ReportOperationsNotReadable(other, otherSyntax.GetLocation());
+										continue;
 									}
+
+									authorizeFactoryOperation |= otherOperations.Value;
 								}
 
 								messages.Add($"Combined {otherDeclarations.Count + 1} declarations of {methodSymbol.Name} on {authTypeName}: {authorizeFactoryOperation}");
