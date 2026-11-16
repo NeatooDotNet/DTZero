@@ -16,6 +16,12 @@ DTZero is what you build when you stop. The `Order` the screen edits is the `Ord
 
 If you are choosing a client technology, this is a reason to choose WebAssembly.
 
+## Is it for you?
+
+It is for teams building an application with a .NET client, Blazor WebAssembly or WPF, where the client and the server are built and deployed together.
+
+It is not for you if your only client is JavaScript or native mobile, if you use Blazor Server with no client tier, if the application is thin CRUD, or if the client and the server are versioned apart. [When not to use it](#when-not-to-use-it) gives the reasons.
+
 ## What it looks like
 
 Client code calls a generated factory:

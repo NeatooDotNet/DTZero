@@ -4,7 +4,7 @@
 **Date:** 2026-11-13
 **Related Todo:** [../todo.md](../todo.md)
 **Serves:** AC-3, AC-7
-**Status:** In Progress
+**Status:** Done
 **Last Updated:** 2026-11-13
 **Plan-review opt-in:** No (the user reads the outline before the prose is written)
 **Code-review opt-in:** No (one small Design sample; the test review covers it)
@@ -57,13 +57,13 @@ Rewrite `README.md` from the ruled verdict and the confirmed DDD map: the proble
 
 ## Acceptance
 
-- [ ] A caller of the public endpoint gets the designed contract for a stored order `[integration]`
-- [ ] A domain verb called through the public endpoint changes the stored order by the same rule the client's call uses `[integration]`
-- [ ] The public endpoint refuses what the domain refuses, without a second copy of the rule `[integration]`
-- [ ] The README states the problem, the audience and when not to use DTZero before its first code block `[explicit-skip: document]`
-- [ ] The README answers the three objections in order: persistence in the entity, "only a niche", "DTOs do more" `[explicit-skip: document]`
-- [ ] Every C# block in the README is an embedded Design region `[explicit-skip: document]`
-- [ ] Both solutions build and test green after the change `[explicit-skip: covered by the gate logs]`
+- [x] A caller of the public endpoint gets the designed contract for a stored order `[integration]`
+- [x] A domain verb called through the public endpoint changes the stored order by the same rule the client's call uses `[integration]`
+- [x] The public endpoint refuses what the domain refuses, without a second copy of the rule `[integration]`
+- [x] The README states the problem, the audience and when not to use DTZero before its first code block `[explicit-skip: document]`
+- [x] The README answers the three objections in order: persistence in the entity, "only a niche", "DTOs do more" `[explicit-skip: document]`
+- [x] Every C# block in the README is an embedded Design region `[explicit-skip: document]`
+- [x] Both solutions build and test green after the change `[explicit-skip: covered by the gate logs]`
 
 ---
 
@@ -77,7 +77,7 @@ Rewrite `README.md` from the ruled verdict and the confirmed DDD map: the proble
 
 ## Punchlist
 
-- [ ] Decide whether the public endpoints carry `RequireAuthorization`, and show an authorized aggregate reached through a public endpoint so "no entry point can miss the rule" has a test · `PublicApi/PublicOrderApi.cs` · decided with the user; if shown, an HTTP test pins it · AC-7 (fits PITCH-005, authorization)
+- Moved to the todo's Punchlist (cross-plan): authorization on the public endpoints.
 
 ---
 
@@ -96,6 +96,10 @@ Also added, beyond the bullets: `Get_NonNumericId_Is400`, `Submit_MissingOrder_I
 ---
 
 ## Gate Record
+
+- Round 1, 2026-11-15, `reviews/003-test-review.md`: no veto-tier finding on tests, logs or existing tests; the three behavioral bullets are pinned at integration tier. Verdict DECISION NEEDED on one document point: the audience and "when not to use it" came after the first code block, against AC-3.
+- Resolved without a ruling by meeting the criterion: an "Is it for you?" section now states the audience and the four limits before the first code block, and links to the detailed section. No second round was run; the change is markdown only and was checked by heading and code-fence line numbers.
+- Not triaged (reviewer listed as tech-debt or theoretical): fixed ids in the missing-order tests; the `Save ... ?? throw` branch.
 
 ---
 
