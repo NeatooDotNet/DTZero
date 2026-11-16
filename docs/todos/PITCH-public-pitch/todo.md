@@ -45,9 +45,10 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 | 002 | [002-ddd-map](./plans/002-ddd-map.md) | Map DDD concepts to DTZero components | AC-2 | Done | #42 |
 | 003 | [003-readme](./plans/003-readme.md) | Rewrite the README around the case | AC-3, AC-7 | Done | #43 |
 | 004 | [004-narrative-docs](./plans/004-narrative-docs.md) | Narrative docs carry the why | AC-4, AC-7 | Done | #44 |
-| 005 | [005-component-docs](./plans/005-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Draft | — |
+| 005 | [005-authorization](./plans/005-authorization.md) | Authorization and trust | AC-4, AC-7 | In Progress | — |
 | 006 | [006-skill](./plans/006-skill.md) | The skill carries the same reasons | AC-5, AC-7 | Draft | — |
 | 007 | [007-launch-plan](./plans/007-launch-plan.md) | A plan for generating interest | AC-6 | Draft | — |
+| 008 | [008-component-docs](./plans/008-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Draft | — |
 | 009 | [009-auth-inheritance](./plans/009-auth-inheritance.md) | Inherited authorization checks are enforced | AC-4, AC-7 | Done | #45 |
 
 ---
@@ -68,6 +69,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 
 ## Discovery Log
 
+- 2026-11-15 · Re-split · PITCH-005 became two plans: 005 (authorization and trust, with Design samples) and 008 (the remaining component pages, prose). The authorization work needs code and a test review; the rest does not. Eight plans of a cap of eleven.
 - 2026-11-16 · Scope · The PITCH-005 probe found that the generator drops an authorization check an auth interface inherits, with no diagnostic, and cannot resolve one declared on an abstract base class. Keith ruled: fix the generator in this todo (PITCH-009), ahead of the authorization page. Out of Scope amended. Nine plans of a cap of eleven.
 
 ---
