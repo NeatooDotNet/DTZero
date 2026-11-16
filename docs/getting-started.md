@@ -1,12 +1,12 @@
 # Getting Started
 
-In [Why DTZero](the-problem.md) you saw the single-layer concept: write your domain model once, load it on both tiers, and let DTZero carry its objects and operations across the seam without DTOs or controllers. This guide makes it real: an `Order` aggregate, the one in DTZero's compiled example set (`src/Design`), built on the client and loaded and saved on the server.
+In [Why DTZero](the-problem.md) you saw the argument: write your domain model once, load it on both tiers, and let DTZero carry its objects and operations across the seam without DTOs or controllers. This guide makes it real: an `Order` aggregate, the one in DTZero's compiled example set (`src/Design`), built on the client and loaded and saved on the server.
 
 ## Prerequisites
 
 - .NET 9.0 or 10.0 SDK
 - ASP.NET Core for server (optional — can use Logical mode for single-tier)
-- Any .NET client (Blazor WebAssembly, MAUI, WPF, console)
+- A .NET client. Blazor WebAssembly and WPF are the ones DTZero is used with in production
 
 ## Project Structure
 
@@ -16,7 +16,7 @@ DTZero's architecture needs three projects: one for the domain model (shared), o
 YourSolution/
 ├── YourApp.Domain/          # Shared: Domain models with factory methods
 ├── YourApp.Server/          # ASP.NET Core server (hosts the Blazor WASM client)
-└── YourApp.Client/          # Blazor WASM, MAUI, or other client
+└── YourApp.Client/          # Blazor WASM, WPF, or another .NET client
 ```
 
 For Blazor WebAssembly, the server project hosts the client (hosted WASM). A single `dotnet run` on the server starts both the API and the client application.
@@ -253,6 +253,7 @@ When the client calls `orderFactory.Save(order)`:
 2. HTTP POST to `/api/dtzero`
 3. Server deserializes the order, resolves `IOrderDbContext` from its DI container
 4. Server calls the order's `Insert` (a new order) with the injected store
+   - `Insert` hands the lines to their list factory, which hands each line to its own: factory methods call factory methods, all on the server
 5. Server serializes the saved order and returns it
 6. Client deserializes it, and the caller keeps it: `order = await orderFactory.Save(order)`
 

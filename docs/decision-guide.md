@@ -2,6 +2,8 @@
 
 Quick answers to common "when should I use...?" questions.
 
+The first question is whether DTZero fits at all. It does when the client is .NET and ships with the server. It does not when the only client is JavaScript or native mobile, when there is no client tier, or when the tiers are versioned apart. [Why DTZero](the-problem.md#when-not-to-use-it) gives the reasons.
+
 ---
 
 ## When Do I Need [Remote]?
@@ -166,6 +168,27 @@ What fits your auth model?
 ```
 
 See [Authorization](authorization.md) for details.
+
+---
+
+## Root or Child?
+
+Neither is a kind of class. An entity is a root where the client calls its factory method, and a child where another factory method calls it. Write the method the graph needs:
+
+- The client asks for it directly, by key: `[Remote] internal`, a root entry point.
+- A parent hands it what it needs, such as its row: `internal`, no `[Remote]`.
+
+One class can have both. **Leave out** the root method until a screen needs the entity on its own.
+
+See [Client-Server Architecture](client-server-architecture.md#method-visibility-and-the-clientserver-boundary).
+
+---
+
+## Do I Still Need DTOs?
+
+Not for your own client. For a caller outside the application, yes: design a contract by hand, and have its endpoints call the same factories so the logic is not written twice.
+
+See [A Public API Over the Same Model](public-api.md).
 
 ---
 

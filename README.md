@@ -303,6 +303,9 @@ builder.Services.AddKeyedScoped(
 
 - [What Problem Does DTZero Solve?](docs/the-problem.md)
 - [Getting Started](docs/getting-started.md)
+- [DDD Concepts in DTZero](docs/ddd-concepts.md): each concept and where it lands
+- [A Public API Over the Same Model](docs/public-api.md)
+- [Client-Server Architecture](docs/client-server-architecture.md): where calls cross
 - [Decision Guide](docs/decision-guide.md): when to use what
 - [Factory Operations](docs/factory-operations.md): Create, Fetch, Insert, Update, Delete, Execute
 - [Save Operation](docs/save-operation.md): how `Save` routes
