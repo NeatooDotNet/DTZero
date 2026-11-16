@@ -9,7 +9,7 @@
 **Plan-review opt-in:** No (the user reads the outline before the prose is written)
 **Code-review opt-in:** No (one small Design sample; the test review covers it)
 **Branch:** `PITCH-003-readme`
-**PR:** —
+**PR:** #43
 
 ---
 
