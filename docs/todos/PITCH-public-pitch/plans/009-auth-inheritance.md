@@ -52,18 +52,23 @@ Make the generator honor authorization checks an auth type inherits. This is the
 2. Resolve every authorization call through the auth type the factory names, wherever the method is declared.
 3. Pin both with tests in the main solution: generated-code behavior on the client/server containers, for interface inheritance and for a base class.
 4. Bump the version to 2.0.1 and write its release notes.
+5. Report a check the generator cannot enforce as a build error, where it is now dropped without a word.
+6. Enforce checks declared on the interfaces a class auth type implements.
 
 ---
 
 ## Acceptance
 
-- [ ] A check declared on a base interface refuses an operation on a type whose auth interface only inherits it `[integration]`
-- [ ] The same inherited check is asked by the client through `Can*` and answers as the server does `[integration]`
-- [ ] A check declared on a base class is enforced when the factory names the derived auth type, with only the derived type registered `[integration]`
-- [ ] A check reachable through two inheritance paths runs once per operation `[integration]`
-- [ ] A check a derived auth class overrides runs the derived version `[integration]`
-- [ ] Every authorization test that existed before the change still passes unchanged `[explicit-skip: covered by the gate logs]`
-- [ ] Both solutions build and test green `[explicit-skip: covered by the gate logs]`
+- [x] A check declared on a base interface refuses an operation on a type whose auth interface only inherits it `[integration]`
+- [x] The same inherited check is asked by the client through `Can*` and answers as the server does `[integration]`
+- [x] A check declared on a base class is enforced when the factory names the derived auth type, with only the derived type registered `[integration]`
+- [x] A check reachable through two inheritance paths runs once per operation `[integration]`
+- [x] A check a derived auth class overrides runs the derived version `[integration]`
+- [x] A check declared in a referenced assembly fails the build with a diagnostic that names it `[unit]`
+- [x] A check declared on an interface a class auth type implements is enforced through that class `[integration]`
+- [x] A check the auth type cannot call fails the build with a diagnostic, and no call is generated for it `[unit]`
+- [x] Every authorization test that existed before the change still passes unchanged `[explicit-skip: covered by the gate logs]`
+- [x] Both solutions build and test green `[explicit-skip: covered by the gate logs]`
 
 ---
 
@@ -82,6 +87,21 @@ Make the generator honor authorization checks an auth type inherits. This is the
 
 ## Test Evidence
 
+Logs of the final state: `reviews/009-impl3-build.log`, `reviews/009-impl3-test.log`. UnitTests 871 to 889, IntegrationTests 664 to 686 (5 skipped), Design.Tests 187 unchanged, per framework. Integration tests are in `src/Tests/DTZero.IntegrationTests/Authorization/AuthInheritanceTests.cs` on the client/server containers; unit tests are under `src/Tests/DTZero.UnitTests`.
+
+| Acceptance bullet | Test | Tier |
+|---|---|---|
+| Base-interface check refuses | `InterfaceChain_InheritedCheck_RefusesFetch`, `InterfaceChain_InheritedCheck_RefusesCreate`, `InterfaceChain_InheritedCheck_AllowsFetch` | integration, confirmed |
+| Client `Can*` answers as the server | `InterfaceChain_InheritedCheck_ClientCanFetch_AnswersAsServer`, `InterfaceChain_InheritedCheck_ClientCanCreate_AnswersAsServer` | integration, confirmed |
+| Base-class check, only the derived type registered | `BaseClass_InheritedCheck_RefusesFetch`, `BaseClass_OnlyTheDerivedAuthTypeIsRegistered_AndTheFactoryWorks` | integration, confirmed |
+| Two paths, runs once | `Diamond_CheckRunsOnce_PerFetch`, `Diamond_CheckRunsOnce_PerCreateAndPerCanCreate` | integration, confirmed |
+| Override runs the derived version | `Override_WithoutAttribute_RunsTheDerivedVersion`, `Override_WithRestatedAttribute_RunsTheDerivedVersion` | integration, confirmed |
+| Referenced-assembly check fails the build | `NF0107_CheckInheritedFromInterfaceInReferencedAssembly_ReportsError`, `NF0107_CheckInheritedFromAbstractBaseClassInReferencedAssembly_ReportsError` (`Diagnostics/NF0107Tests.cs`) | unit, confirmed |
+| Interface a class auth type implements | `ImplementedInterface_Check_RefusesFetchAndCreate`, `ImplementedInterface_Checks_Allow_AndEachRunsOncePerOperation`, `ImplementedInterface_ClassRestatedAttribute_Wins` | integration, confirmed |
+| Not callable fails the build, no call generated | `NF0108_AttributedInterfaceMethod_ImplementedExplicitly_ReportsError_AndGeneratesNoCall`, `NF0108_AttributeOnExplicitImplementation_ReportsError_AndGeneratesNoCall` (`Diagnostics/NF0108Tests.cs`) | unit, confirmed |
+
+Also added: interface-factory and static-factory coverage, and `InheritedAuthEmissionTests` (an inherited check generates the same factory code as a declared one).
+
 ---
 
 ## Gate Record
@@ -89,6 +109,14 @@ Make the generator honor authorization checks an auth type inherits. This is the
 ---
 
 ## Plan Amendments
+
+- 2026-11-16, Steps 1 and 2: one change in the transform covers class, interface and static factories; no renderer changed. A check found twice by name and parameter types is kept once, the most-derived declaration that carries the attribute. A refusal message now names the auth type the factory uses.
+- 2026-11-16, Step 5 added: a check with no source declaration (a base in a referenced assembly) was still dropped with only a debug message. It is now error NF0107.
+- 2026-11-16, Step 6 added: the implementer found a third silent case, a class auth type whose checks sit on an interface it implements. Those are now enforced; a check the class cannot be called for (explicit or default implementation) is error NF0108, replacing a CS1061 in generated code.
+- 2026-11-16: generated output for every target that existed before the plan was compared with a snapshot and is byte-identical (implementer's report; not re-checked by the orchestrator).
+- 2026-11-16: the new tests were not run against the old generator. The PITCH-005 probe observed the old behavior.
+- 2026-11-16: not supported and not tested: a generic base auth interface; two unrelated base interfaces declaring the same check. Both are expected to fail at compile time. Recorded in the release notes.
+- 2026-11-16: NF0107 and NF0108 are not yet in `docs/` or the skill; PITCH-005 documents them on the authorization page.
 
 ---
 

@@ -290,6 +290,92 @@ public class AuthInheritanceTests
     }
 
     // ========================================================================
+    // A class auth type enforces the checks declared on the interfaces it
+    // implements, directly or through a base class.
+    // ========================================================================
+
+    [Fact]
+    public async Task ImplementedInterface_Check_RefusesFetchAndCreate()
+    {
+        var (client, server, _) = Scopes();
+        var factory = client.ServiceProvider.GetRequiredService<IImplementedChecksTargetFactory>();
+
+        Assert.Null(await factory.Fetch(AuthInheritanceKeys.Denied));
+        Assert.Null(factory.Create(AuthInheritanceKeys.Denied));
+
+        Assert.Contains("ImplementedChecksAuth.CanReadImplemented:denied", Log(server).Calls);
+        Assert.Contains("ImplementedChecksAuth.CanReadImplemented:denied", Log(client).Calls);
+    }
+
+    [Fact]
+    public async Task ImplementedInterface_CheckOnBaseClassInterface_RefusesFetch()
+    {
+        var (client, server, _) = Scopes();
+        var factory = client.ServiceProvider.GetRequiredService<IImplementedChecksTargetFactory>();
+
+        Assert.Null(await factory.Fetch(AuthInheritanceKeys.DeniedViaBaseInterface));
+        Assert.Contains("ImplementedChecksBase.CanFetchViaBase:denied-via-base-interface", Log(server).Calls);
+    }
+
+    [Fact]
+    public async Task ImplementedInterface_Checks_Allow_AndEachRunsOncePerOperation()
+    {
+        var (client, server, _) = Scopes();
+        var factory = client.ServiceProvider.GetRequiredService<IImplementedChecksTargetFactory>();
+        var fetchKey = NewKey();
+        var createKey = NewKey();
+
+        var fetched = await factory.Fetch(fetchKey);
+        var created = factory.Create(createKey);
+
+        Assert.NotNull(fetched);
+        Assert.NotNull(created);
+
+        // Fetch: the Read check and the base-class interface's Fetch check (reachable through
+        // the base class and the class's own interface list), once each. Not the restated
+        // check: the class restated it for Create only.
+        string[] fetchExpected =
+        [
+            $"ImplementedChecksAuth.CanReadImplemented:{fetchKey}",
+            $"ImplementedChecksBase.CanFetchViaBase:{fetchKey}",
+        ];
+        Assert.Equal(fetchExpected.Order(StringComparer.Ordinal), Log(server).CallsFor(fetchKey).Order(StringComparer.Ordinal));
+
+        string[] createExpected =
+        [
+            $"ImplementedChecksAuth.CanReadImplemented:{createKey}",
+            $"ImplementedChecksAuth.CanFetchRestatedOnClass:{createKey}",
+        ];
+        Assert.Equal(createExpected.Order(StringComparer.Ordinal), Log(client).CallsFor(createKey).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task ImplementedInterface_ClassRestatedAttribute_Wins()
+    {
+        var (client, _, _) = Scopes();
+        var factory = client.ServiceProvider.GetRequiredService<IImplementedChecksTargetFactory>();
+
+        // The interface declares the check for Fetch; the class restates it for Create.
+        Assert.NotNull(await factory.Fetch(AuthInheritanceKeys.DeniedByRestatement));
+        Assert.Null(factory.Create(AuthInheritanceKeys.DeniedByRestatement));
+    }
+
+    [Fact]
+    public void ImplementedInterface_ClientCanMethods_AnswerFromTheImplementedChecks()
+    {
+        var (client, _, _) = Scopes();
+        var factory = client.ServiceProvider.GetRequiredService<IImplementedChecksTargetFactory>();
+        var allowedKey = NewKey();
+
+        Assert.False(factory.CanFetch(AuthInheritanceKeys.Denied).HasAccess);
+        Assert.False(factory.CanFetch(AuthInheritanceKeys.DeniedViaBaseInterface).HasAccess);
+        Assert.True(factory.CanFetch(AuthInheritanceKeys.DeniedByRestatement).HasAccess);
+        Assert.False(factory.CanCreate(AuthInheritanceKeys.DeniedByRestatement).HasAccess);
+        Assert.True(factory.CanFetch(allowedKey).HasAccess);
+        Assert.True(factory.CanCreate(allowedKey).HasAccess);
+    }
+
+    // ========================================================================
     // The interface-factory and static-factory renderers resolve and register
     // the auth type the same way; their inherited checks are enforced too.
     // ========================================================================

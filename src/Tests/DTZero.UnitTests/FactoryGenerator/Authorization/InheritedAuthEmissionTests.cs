@@ -54,9 +54,10 @@ using System.Threading.Tasks;
         // integration test project.
         var (diagnostics, _, runResult) = DiagnosticTestHelper.RunGenerator(source);
 
-        // Every check in these fixtures is declared in source, so none may be reported as
-        // impossible to generate (NF0107, see NF0107Tests).
+        // Every check in these fixtures is declared in source and callable on the auth type, so
+        // none may be reported as impossible to generate (NF0107, NF0108; see their tests).
         Assert.DoesNotContain(diagnostics, d => d.Id == "NF0107");
+        Assert.DoesNotContain(diagnostics, d => d.Id == "NF0108");
 
         var generated = runResult.GeneratedTrees
             .FirstOrDefault(t => t.FilePath.Contains(factoryFileFragment))
@@ -200,6 +201,60 @@ using System.Threading.Tasks;
         Assert.Contains("authorized = auth.CanRead(key);", expected);
         Assert.Equal(expected, GeneratedFactory(overridden, "TargetFactory"));
         Assert.Equal(expected, GeneratedFactory(restated, "TargetFactory"));
+    }
+
+    [Fact]
+    public void ClassImplementingAttributedInterface_GeneratesAsCheckDeclaredOnClass()
+    {
+        var declared = Fixture(@"
+    public class Auth
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var implemented = Fixture(@"
+    public interface IChecks
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+        bool CanRead(string key);
+    }
+    public class Auth : IChecks { public bool CanRead(string key) => true; }
+", "Auth");
+
+        // Implemented through a base class, and listed again on the class: still one check.
+        var implementedViaBase = Fixture(@"
+    public interface IChecks
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+        bool CanRead(string key);
+    }
+    public abstract class AuthBase : IChecks { public bool CanRead(string key) => true; }
+    public class Auth : AuthBase, IChecks { }
+", "Auth");
+
+        // The class restates the check with its own operations; the class's declaration wins.
+        var restatedOnClass = Fixture(@"
+    public interface IChecks
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Write)]
+        bool CanRead(string key);
+    }
+    public class Auth : IChecks
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var expected = GeneratedFactory(declared, "TargetFactory");
+
+        Assert.Contains("Auth auth = ServiceProvider.GetRequiredService<Auth>();", expected);
+        Assert.Contains("authorized = auth.CanRead(key);", expected);
+        Assert.Equal(expected, GeneratedFactory(implemented, "TargetFactory"));
+        Assert.Equal(expected, GeneratedFactory(implementedViaBase, "TargetFactory"));
+        Assert.Equal(expected, GeneratedFactory(restatedOnClass, "TargetFactory"));
     }
 
     [Fact]

@@ -26,6 +26,9 @@ public static class AuthInheritanceKeys
 
     /// <summary>Refused only by the derived restatement (override plus attribute) of a check whose base version allows it.</summary>
     public const string DeniedByRestatement = "denied-by-restatement";
+
+    /// <summary>Refused by a check declared on an interface a base class of the auth class implements.</summary>
+    public const string DeniedViaBaseInterface = "denied-via-base-interface";
 }
 
 /// <summary>
@@ -201,6 +204,83 @@ public class DerivedClassCheckAuth(AuthInheritanceLog log) : BaseClassCheckAuth(
 [Factory]
 [AuthorizeFactory<DerivedClassCheckAuth>]
 public partial class BaseClassCheckTarget
+{
+    public string Key { get; set; } = "";
+
+    [Create]
+    public void Create(string key)
+    {
+        Key = key;
+    }
+
+    [Remote, Fetch]
+    internal void Fetch(string key)
+    {
+        Key = key;
+    }
+}
+
+#endregion
+
+#region Class auth type - checks declared on interfaces the class implements
+
+/// <summary>
+/// Implemented by the auth class directly. CanFetchRestatedOnClass is declared here for Fetch, but
+/// the class restates it with [AuthorizeFactory] for Create, and the class's declaration wins.
+/// </summary>
+public interface IImplementedChecks
+{
+    [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+    bool CanReadImplemented(string key);
+
+    [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+    bool CanFetchRestatedOnClass(string key);
+}
+
+/// <summary>
+/// Implemented by the auth class's base class, and listed again on the auth class, so its check
+/// is reachable two ways.
+/// </summary>
+public interface IBaseImplementedChecks
+{
+    [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+    bool CanFetchViaBase(string key);
+}
+
+public abstract class ImplementedChecksBase(AuthInheritanceLog log) : IBaseImplementedChecks
+{
+    protected AuthInheritanceLog Log { get; } = log;
+
+    public bool CanFetchViaBase(string key)
+    {
+        Log.Record($"ImplementedChecksBase.CanFetchViaBase:{key}");
+        return key != AuthInheritanceKeys.DeniedViaBaseInterface;
+    }
+}
+
+/// <summary>
+/// The auth type the factory names: a class. Its checks are declared on the interfaces it
+/// implements, apart from the one it restates.
+/// </summary>
+public class ImplementedChecksAuth(AuthInheritanceLog log) : ImplementedChecksBase(log), IImplementedChecks, IBaseImplementedChecks
+{
+    public bool CanReadImplemented(string key)
+    {
+        Log.Record($"ImplementedChecksAuth.CanReadImplemented:{key}");
+        return key != AuthInheritanceKeys.Denied;
+    }
+
+    [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+    public bool CanFetchRestatedOnClass(string key)
+    {
+        Log.Record($"ImplementedChecksAuth.CanFetchRestatedOnClass:{key}");
+        return key != AuthInheritanceKeys.DeniedByRestatement;
+    }
+}
+
+[Factory]
+[AuthorizeFactory<ImplementedChecksAuth>]
+public partial class ImplementedChecksTarget
 {
     public string Key { get; set; } = "";
 

@@ -14,6 +14,8 @@ Current step: Implementation complete, both solutions green; awaiting test revie
 - Second pass (coordinator request): NF0107 (Error, `DiagnosticDescriptors.AuthCheckDeclarationNotInSource`) reported at the `[AuthorizeFactory<T>]` usage when a check has no source declaration (method without syntax, attribute without syntax, or T itself in metadata). Harness gained additive `RunGeneratorWithReferences` + `EmitReference` (emit image, not CompilationReference). Tests: `NF0107Tests` (5), and `InheritedAuthEmissionTests` helper asserts no NF0107. Logs `009-impl2-*.log`: Unit 882, Integration 681/5 skip, Design 187/1.
 - Probe (deleted): explicit interface impl with the attribute on the class -> loud CS1061 in generated code (`auth.TestNamespace.IChecks.CanRead`). Attribute on an interface a CLASS auth type implements -> silently dropped, no check, no diagnostic (not fixed; reported).
 
+- Third pass: class T now reads checks on every interface in T.AllInterfaces (after the class hierarchy, so class declarations win); interface checks T cannot call (explicit impl, attribute on explicit impl, default interface impl) -> NF0108 Error, no call generated. Tests: AuthInheritanceTests ImplementedInterface_* (5), InheritedAuthEmissionTests.ClassImplementingAttributedInterface_GeneratesAsCheckDeclaredOnClass, NF0108Tests (5), NF0107Tests class-implements-metadata-interface (1). Logs `009-impl3-*.log`: Unit 889, Integration 686/5, Design 187/1. Existing generated output byte-identical to the snapshot.
+
 ## Mistakes to Avoid
 - Asserting zero errors on `RunGenerator` output compilation (see above).
 

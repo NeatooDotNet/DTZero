@@ -120,6 +120,22 @@ namespace TestNamespace
     }
 
     [Fact]
+    public void NF0107_ClassAuthTypeImplementsAttributedInterfaceInReferencedAssembly_ReportsError()
+    {
+        var reference = DiagnosticTestHelper.EmitReference(SharedInterface, "SharedAuthInterfaceImplemented");
+        var source = ClassTarget(@"
+    public class Auth : SharedAuth.ISharedReadAuth { public bool CanRead(string key) => true; }
+", "Auth");
+
+        var diagnostic = Assert.Single(NF0107(source, reference));
+
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("'CanRead' declared on 'SharedAuth.ISharedReadAuth'", diagnostic.GetMessage(), StringComparison.Ordinal);
+        Assert.Contains("auth type 'Auth'", diagnostic.GetMessage(), StringComparison.Ordinal);
+        Assert.Equal("AuthorizeFactory<Auth>", LocatedText(source, diagnostic));
+    }
+
+    [Fact]
     public void NF0107_AuthTypeItselfInReferencedAssembly_ReportsError()
     {
         var reference = DiagnosticTestHelper.EmitReference(SharedAuthClass, "SharedAuthClass");

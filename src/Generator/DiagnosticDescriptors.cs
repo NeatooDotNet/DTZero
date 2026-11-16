@@ -90,6 +90,25 @@ internal static class DiagnosticDescriptors
         description: "[AuthorizeFactory] checks are generated from their source declarations. A check the auth type inherits from a base class or base interface in a referenced assembly, or declared on an auth type that is itself in a referenced assembly, cannot be generated, and the operation would run without it. Restate the check in this project: a virtual or abstract base method can be overridden with [AuthorizeFactory] on the override, and an interface check can be redeclared on the auth interface.");
 
     /// <summary>
+    /// NF0108: An authorization check cannot be called through the auth type, because the auth class
+    /// implements it explicitly (or not at all, leaving a default interface implementation).
+    /// </summary>
+    /// <remarks>
+    /// The generated factory resolves the auth type and calls each check on it. A check the class
+    /// implements explicitly is not a member of the class, so that call does not compile; it used to
+    /// be emitted anyway and fail with an unrelated-looking CS1061 inside generated code. No call is
+    /// generated for it now. Error, because the operation would otherwise run without the check.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor AuthCheckNotCallableOnAuthType = new(
+        id: "NF0108",
+        title: "Authorization check is not callable on the auth type",
+        messageFormat: "Authorization check '{1}' cannot be called through auth type '{0}': '{0}' implements it explicitly, or not at all. An authorization check must be callable on the auth type; implement '{1}' implicitly as a public method of '{0}', or name the interface in [AuthorizeFactory<T>].",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The generated factory calls each [AuthorizeFactory] check on the auth type named by [AuthorizeFactory<T>]. When T is a class that implements the check's interface method explicitly (or carries [AuthorizeFactory] on the explicit implementation itself), or leaves it to a default interface implementation, the check is not a member of T and cannot be called through it. Implement the method implicitly as a public method of T, or name the interface as the auth type.");
+
+    /// <summary>
     /// NF0104: Hint name truncated due to length limit.
     /// </summary>
     public static readonly DiagnosticDescriptor HintNameTruncated = new(
