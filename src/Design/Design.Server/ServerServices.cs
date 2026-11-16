@@ -170,9 +170,10 @@ public static class ServerServices
         // The in-memory stores stand in for a database, so they outlive each
         // request's scope; a real DbContext would be scoped.
         //
-        // InMemoryTaxTable, InMemorySupportLog and InMemoryCheckoutLedger are not named for their
-        // interfaces, so the convention would miss them -- on purpose: the
-        // convention also runs on clients, and all three are server-only.
+        // InMemoryTaxTable, InMemorySupportLog, InMemoryCheckoutLedger and
+        // InMemoryLockableOrderStore are not named for their interfaces, so the
+        // convention would miss them -- on purpose: the convention also runs on
+        // clients, and all four are server-only.
         //
         // TenantTokenService takes a constructor argument the convention cannot
         // supply. In a real server this value comes from configuration or the
@@ -203,6 +204,7 @@ public static class ServerServices
         services.AddSingleton<ICustomerPreferencesStore, InMemoryCustomerPreferencesStore>();
         services.AddSingleton<ISupportLog, InMemorySupportLog>();
         services.AddSingleton<ICheckoutLedger, InMemoryCheckoutLedger>();
+        services.AddSingleton<ILockableOrderStore, InMemoryLockableOrderStore>();
         services.AddScoped(_ => new TenantTokenService("server-token"));
         services.AddScoped<ITenantTokenService>(sp => sp.GetRequiredService<TenantTokenService>());
 

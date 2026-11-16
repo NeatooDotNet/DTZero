@@ -540,4 +540,33 @@ public class ParamAuthorizationTests
         server.Dispose();
         client.Dispose();
     }
+
+    /// <summary>
+    /// CanWrite(target) decides from the Status the client sends. The server refuses
+    /// the order while the client says it is Locked, and saves the same object once
+    /// the client says it is Active: the rule cannot tell a change of state from a
+    /// change of claim. Contrast StoredRecordAuthorizationTests, where the rule reads
+    /// the stored row.
+    /// </summary>
+    [Fact]
+    public async Task ParamAuth_Save_DecidesFromTheStatusTheClientSends()
+    {
+        ParamAuthOrderAuth.ResetFlags();
+        var (server, client, _) = DesignClientServerContainers.Scopes();
+        var factory = client.GetRequiredService<IParamAuthOrderFactory>();
+        var order = factory.Create("Client Claims");
+        Assert.NotNull(order);
+        order.Status = "Locked";
+
+        await Assert.ThrowsAsync<NotAuthorizedException>(() => factory.Save(order));
+
+        order.Status = "Active";
+        var saved = await factory.Save(order);
+
+        Assert.NotNull(saved);
+        Assert.Equal("Active", saved.Status);
+
+        server.Dispose();
+        client.Dispose();
+    }
 }

@@ -64,6 +64,8 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 ## Parked
 
 - NeatooDotNet/Neatoo#127 · Neatoo: re-run rules on the server before a write, by mechanism or option · PITCH-001 verdict, sixth ruling
+- proposed · Generator ignores `[AuthorizeFactory]` methods an auth interface inherits from a base interface: no check is generated and no diagnostic is raised (`GetMethodsRecursive` walks `BaseType` only) · PITCH-005 Step 1 probe
+- proposed · Auth methods declared on an abstract base class are resolved by their declaring type, so the server fails at startup with "Cannot instantiate implementation type" · PITCH-005 Step 1 probe
 
 ---
 
