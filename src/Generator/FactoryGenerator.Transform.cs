@@ -68,6 +68,76 @@ public partial class Factory
 	}
 
 	/// <summary>
+	/// Gets the methods of an authorization type named by <c>[AuthorizeFactory&lt;T&gt;]</c>,
+	/// including every method it inherits.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// A class contributes its own methods and those of each base class (<see cref="GetMethodsRecursive"/>).
+	/// An interface has no base type, so it contributes its own methods and those of every interface
+	/// it inherits, through <see cref="ITypeSymbol.AllInterfaces"/>. That list holds each interface once,
+	/// so a check reachable through two inheritance paths (a diamond) is read once.
+	/// </para>
+	/// <para>
+	/// Both walks list the most-derived declarations first: the class walk by construction, the
+	/// interface walk because <c>AllInterfaces</c> lists an interface before the interfaces it inherits.
+	/// A check declared again further down the hierarchy with the same name and parameter types — an
+	/// override, a <c>new</c> member, or a restatement in a derived interface — is kept once, as the
+	/// most-derived declaration that carries <c>[AuthorizeFactory]</c>. The generated call is made
+	/// through the auth type itself, so it binds to the most-derived member and runs the derived
+	/// implementation either way; keeping both declarations would only run that implementation twice.
+	/// </para>
+	/// </remarks>
+	private static List<IMethodSymbol> GetAuthMethodsRecursive(INamedTypeSymbol? authSymbol, List<string> messages)
+	{
+		if (authSymbol == null)
+		{
+			return [];
+		}
+
+		List<IMethodSymbol> candidates;
+		if (authSymbol.TypeKind == TypeKind.Interface)
+		{
+			candidates = authSymbol.GetMembers().OfType<IMethodSymbol>().ToList();
+			foreach (var inheritedInterface in authSymbol.AllInterfaces)
+			{
+				candidates.AddRange(inheritedInterface.GetMembers().OfType<IMethodSymbol>());
+			}
+		}
+		else
+		{
+			candidates = GetMethodsRecursive(authSymbol);
+		}
+
+		var methods = new List<IMethodSymbol>();
+		var authSignatures = new HashSet<string>();
+
+		foreach (var method in candidates)
+		{
+			if (IsAuthorizeFactoryMethod(method))
+			{
+				var signature = $"{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()))})";
+
+				if (!authSignatures.Add(signature))
+				{
+					messages.Add($"Skipping {method.ContainingType.Name}.{method.Name}; a more-derived declaration of {signature} on {authSymbol.Name} is already an authorization check");
+					continue;
+				}
+			}
+
+			methods.Add(method);
+		}
+
+		return methods;
+	}
+
+	/// <summary>
+	/// Whether the method carries <c>[AuthorizeFactory(...)]</c>, i.e. is an authorization check.
+	/// </summary>
+	private static bool IsAuthorizeFactoryMethod(IMethodSymbol method) =>
+		method.GetAttributes().Any(a => a.AttributeClass?.Name == "AuthorizeFactoryAttribute");
+
+	/// <summary>
 	/// Extracts factory method information from a type's methods.
 	/// Identifies methods with factory operation attributes (Create, Fetch, Insert, Update, Delete, Execute)
 	/// and validates their signatures.
@@ -321,12 +391,45 @@ public partial class Factory
 				concreteClassName = FindConcreteImplementation(semanticModel.Compilation, authNamedType);
 			}
 
+			// NF0107: a check in the auth type's hierarchy that cannot be generated is reported, never
+			// dropped with only a debug message. Reported at the [AuthorizeFactory<T>] usage; when
+			// that is not in source (inherited from a referenced base), at the factory type.
+			var authTypeName = authorizationRuleType?.Name ?? "";
+			var reportLocation = authorizeAttribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+				?? typeSymbol.Locations.FirstOrDefault(l => l.IsInSource);
+
+			void ReportCheckNotInSource(IMethodSymbol methodSymbol)
+			{
+				messages.Add($"NF0107: authorization check {methodSymbol.ContainingType.Name}.{methodSymbol.Name} has no source declaration; no check generated for {authTypeName}");
+
+				if (reportLocation == null)
+				{
+					return;
+				}
+
+				var lineSpan = reportLocation.GetLineSpan();
+				diagnostics.Add(new DiagnosticInfo(
+					"NF0107",
+					lineSpan.Path ?? "",
+					lineSpan.StartLinePosition.Line,
+					lineSpan.StartLinePosition.Character,
+					lineSpan.EndLinePosition.Line,
+					lineSpan.EndLinePosition.Character,
+					reportLocation.SourceSpan.Start,
+					reportLocation.SourceSpan.Length,
+					authTypeName,
+					methodSymbol.ContainingType.ToDisplayString(),
+					methodSymbol.Name));
+			}
+
 			if (authorizationRuleType?.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is TypeDeclarationSyntax syntax)
 			{
 				var authSemanticModel = semanticModel.Compilation.GetSemanticModel(syntax.SyntaxTree);
 				var authSymbol = authSemanticModel.GetDeclaredSymbol(syntax);
 
-				var methodSymbols = GetMethodsRecursive(authSymbol);
+				// Checks the auth type inherits (from base classes or base interfaces) are read
+				// as well as the ones it declares.
+				var methodSymbols = GetAuthMethodsRecursive(authSymbol, messages);
 
 				foreach (var methodSymbol in methodSymbols)
 				{
@@ -347,6 +450,10 @@ public partial class Factory
 					if (methodSymbol.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is not MethodDeclarationSyntax methodSyntax)
 					{
 						messages.Add($"No MethodDeclarationSyntax for {methodSymbol.Name}");
+						if (IsAuthorizeFactoryMethod(methodSymbol))
+						{
+							ReportCheckNotInSource(methodSymbol);
+						}
 						continue;
 					}
 
@@ -359,6 +466,7 @@ public partial class Factory
 							if (attribute.ApplicationSyntaxReference?.GetSyntax() is not AttributeSyntax attributeSyntax)
 							{
 								messages.Add($"No AttributeSyntax for {methodSymbol.Name} {attribute.ToString()}");
+								ReportCheckNotInSource(methodSymbol);
 								continue;
 							}
 
@@ -407,6 +515,13 @@ public partial class Factory
 
 							var authMethodInfo = new TypeAuthMethodInfo(authorizeFactoryOperation, methodSymbol, methodSyntax, concreteClassName);
 
+							// The check is resolved and called through the auth type the factory names,
+							// wherever the method is declared. MethodInfo records the declaring type, which
+							// for an inherited check is a base class or base interface: resolving that
+							// would make the base a second service to register (an abstract base cannot be
+							// registered at all). For a check T declares itself this is the same name.
+							authMethodInfo.ClassName = authSymbol!.Name;
+
 							// Mark auth method parameters whose type matches the entity type as IsTarget.
 							// This enables: (1) passing the target entity to auth methods on write operations,
 							// (2) suppressing CanXxx generation when auth needs the target.
@@ -432,6 +547,16 @@ public partial class Factory
 			else
 			{
 				messages.Add($"No TypeDeclarationSyntax for {authorizeAttribute}");
+
+				// The auth type itself is not in source (a referenced assembly): none of its checks
+				// can be generated, so each one it carries is reported.
+				foreach (var methodSymbol in GetAuthMethodsRecursive(authorizationRuleType as INamedTypeSymbol, messages))
+				{
+					if (IsAuthorizeFactoryMethod(methodSymbol))
+					{
+						ReportCheckNotInSource(methodSymbol);
+					}
+				}
 			}
 		}
 		else

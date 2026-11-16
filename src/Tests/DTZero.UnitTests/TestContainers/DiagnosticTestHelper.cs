@@ -120,6 +120,68 @@ public static class DiagnosticTestHelper
         return (diagnostics, outputCompilation, runResult);
     }
 
+    /// <summary>
+    /// Runs the source generator on <paramref name="source"/> with additional metadata references,
+    /// such as an assembly built by <see cref="EmitReference"/>.
+    /// </summary>
+    /// <remarks>
+    /// Added for NF0107 (PITCH-009), whose subject is a declaration that exists only in a referenced
+    /// assembly. Otherwise identical to <see cref="RunGenerator(string)"/>, which it leaves untouched.
+    /// </remarks>
+    public static (ImmutableArray<Diagnostic> Diagnostics, Compilation OutputCompilation, GeneratorDriverRunResult RunResult) RunGeneratorWithReferences(
+        string source,
+        params MetadataReference[] additionalReferences)
+    {
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
+        var syntaxTree = CSharpSyntaxTree.ParseText(source, parseOptions);
+
+        var references = BuildReferences();
+        references.AddRange(additionalReferences);
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName: "TestAssembly",
+            syntaxTrees: [syntaxTree],
+            references: references,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(GeneratorInstance.Value);
+
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var diagnostics);
+        var runResult = driver.GetRunResult();
+        AssertGeneratorDidNotThrow(runResult);
+
+        return (diagnostics, outputCompilation, runResult);
+    }
+
+    /// <summary>
+    /// Compiles <paramref name="source"/> into an in-memory assembly and returns it as a metadata
+    /// reference: its symbols carry no source declarations in the compilation that references it.
+    /// </summary>
+    /// <remarks>
+    /// Emitted to an image rather than passed as a CompilationReference, because a
+    /// CompilationReference exposes the other compilation's source symbols, syntax included, and
+    /// would not stand for a referenced assembly. The generator does not run on this compilation.
+    /// </remarks>
+    public static MetadataReference EmitReference(string source, string assemblyName)
+    {
+        var compilation = CSharpCompilation.Create(
+            assemblyName: assemblyName,
+            syntaxTrees: [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest))],
+            references: BuildReferences(),
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        using var stream = new MemoryStream();
+        var result = compilation.Emit(stream);
+        if (!result.Success)
+        {
+            throw new InvalidOperationException(
+                $"Referenced assembly '{assemblyName}' did not compile. Fix the fixture.{Environment.NewLine}"
+                + string.Join(Environment.NewLine, result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)));
+        }
+
+        return MetadataReference.CreateFromImage(stream.ToArray());
+    }
+
     private static List<MetadataReference> BuildReferences()
     {
         // Get the DTZero assembly for references

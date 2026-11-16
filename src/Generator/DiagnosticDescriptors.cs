@@ -71,6 +71,25 @@ internal static class DiagnosticDescriptors
         description: "A [Factory]-attributed interface declares a remote contract; every method is implicitly a remote call. Placing [Create], [Fetch], [Insert], [Update], [Delete], or [Execute] on an interface method causes duplicate generation and compile errors in downstream code. Remove the attribute from the interface method. Scoped authorization on interface factories uses [AuthorizeFactory(Execute)] / [AuthorizeFactory(Read)] on auth-class methods with parameter matching — see AuthorizedRepository.cs.");
 
     /// <summary>
+    /// NF0107: An authorization check in the auth type's hierarchy has no declaration in this
+    /// compilation's source, so no check can be generated for it.
+    /// </summary>
+    /// <remarks>
+    /// The generator builds a check from the method's source declaration. A check declared in a
+    /// referenced assembly — on a base class, a base interface, or the auth type itself — has none,
+    /// and used to be dropped with only a debug message, leaving the operation unchecked. Error,
+    /// because the factory would otherwise run an operation the auth type means to guard.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor AuthCheckDeclarationNotInSource = new(
+        id: "NF0107",
+        title: "Authorization check cannot be generated: declaration is not in source",
+        messageFormat: "Authorization check '{2}' declared on '{1}' cannot be generated for auth type '{0}': its declaration is not in this compilation's source. Declare the check on '{0}' (or another type in this project) so it can be enforced.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "[AuthorizeFactory] checks are generated from their source declarations. A check the auth type inherits from a base class or base interface in a referenced assembly, or declared on an auth type that is itself in a referenced assembly, cannot be generated, and the operation would run without it. Restate the check in this project: a virtual or abstract base method can be overridden with [AuthorizeFactory] on the override, and an interface check can be redeclared on the auth interface.");
+
+    /// <summary>
     /// NF0104: Hint name truncated due to length limit.
     /// </summary>
     public static readonly DiagnosticDescriptor HintNameTruncated = new(

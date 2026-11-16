@@ -141,6 +141,7 @@ public partial class Factory : IIncrementalGenerator
 			"NF0104" => DiagnosticDescriptors.HintNameTruncated,
 			"NF0105" => DiagnosticDescriptors.RemotePublicContradiction,
 			"NF0106" => DiagnosticDescriptors.OperationAttributeOnInterfaceMethod,
+			"NF0107" => DiagnosticDescriptors.AuthCheckDeclarationNotInSource,
 			"NF0201" => DiagnosticDescriptors.FactoryMethodMustBeStatic,
 			"NF0202" => DiagnosticDescriptors.AuthMethodWrongReturnType,
 			"NF0203" => DiagnosticDescriptors.AmbiguousSaveOperations,
