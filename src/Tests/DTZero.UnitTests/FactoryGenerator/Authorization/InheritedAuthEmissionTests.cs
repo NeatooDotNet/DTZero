@@ -234,27 +234,215 @@ using System.Threading.Tasks;
     public class Auth : AuthBase, IChecks { }
 ", "Auth");
 
-        // The class restates the check with its own operations; the class's declaration wins.
-        var restatedOnClass = Fixture(@"
-    public interface IChecks
-    {
-        [AuthorizeFactory(AuthorizeFactoryOperation.Write)]
-        bool CanRead(string key);
-    }
-    public class Auth : IChecks
-    {
-        [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
-        public bool CanRead(string key) => true;
-    }
-", "Auth");
-
         var expected = GeneratedFactory(declared, "TargetFactory");
 
         Assert.Contains("Auth auth = ServiceProvider.GetRequiredService<Auth>();", expected);
         Assert.Contains("authorized = auth.CanRead(key);", expected);
         Assert.Equal(expected, GeneratedFactory(implemented, "TargetFactory"));
         Assert.Equal(expected, GeneratedFactory(implementedViaBase, "TargetFactory"));
-        Assert.Equal(expected, GeneratedFactory(restatedOnClass, "TargetFactory"));
+    }
+
+    [Fact]
+    public void RestatedCheck_GeneratesAsOneDeclarationNamingTheUnionOfOperations()
+    {
+        // One check, declared once for Create and once for Fetch, in each shape a restatement
+        // takes. Every shape must generate what one declaration naming both operations generates.
+        var union = Fixture(@"
+    public class Auth
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create | AuthorizeFactoryOperation.Fetch)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var createOnly = Fixture(@"
+    public class Auth
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var classRestatesInterface = Fixture(@"
+    public interface IChecks
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+        bool CanRead(string key);
+    }
+    public class Auth : IChecks
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var overrideRestated = Fixture(@"
+    public abstract class AuthBase
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+        public virtual bool CanRead(string key) => false;
+    }
+    public class Auth : AuthBase
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+        public override bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var newMemberRestated = Fixture(@"
+    public class AuthBase
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+        public bool CanRead(string key) => false;
+    }
+    public class Auth : AuthBase
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+        public new bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var siblingInterfaces = Fixture(@"
+    public interface ICreateChecks
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+        bool CanRead(string key);
+    }
+    public interface IFetchChecks
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+        bool CanRead(string key);
+    }
+    public class Auth : ICreateChecks, IFetchChecks { public bool CanRead(string key) => true; }
+", "Auth");
+
+        var expected = GeneratedFactory(union, "TargetFactory");
+
+        // The comparison discriminates: dropping Fetch would generate different code.
+        Assert.NotEqual(expected, GeneratedFactory(createOnly, "TargetFactory"));
+
+        Assert.Equal(expected, GeneratedFactory(classRestatesInterface, "TargetFactory"));
+        Assert.Equal(expected, GeneratedFactory(overrideRestated, "TargetFactory"));
+        Assert.Equal(expected, GeneratedFactory(newMemberRestated, "TargetFactory"));
+        Assert.Equal(expected, GeneratedFactory(siblingInterfaces, "TargetFactory"));
+    }
+
+    [Fact]
+    public void RestatedCheck_DerivedInterfaceRestatesBaseInterface_GeneratesAsOneDeclarationNamingTheUnion()
+    {
+        var union = Fixture(@"
+    public interface IAuth
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create | AuthorizeFactoryOperation.Fetch)]
+        bool CanRead(string key);
+    }
+    public class Auth : IAuth { public bool CanRead(string key) => true; }
+", "IAuth");
+
+        var restated = Fixture(@"
+    public interface IAuthRoot
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+        bool CanRead(string key);
+    }
+    public interface IAuth : IAuthRoot
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+        new bool CanRead(string key);
+    }
+    public class Auth : IAuth { public bool CanRead(string key) => true; }
+", "IAuth");
+
+        Assert.Equal(GeneratedFactory(union, "TargetFactory"), GeneratedFactory(restated, "TargetFactory"));
+    }
+
+    [Fact]
+    public void RestatedCheck_RemoteOnAnyDeclaration_MakesTheCombinedCheckRemote()
+    {
+        var remoteUnion = Fixture(@"
+    public class Auth
+    {
+        [Remote]
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create | AuthorizeFactoryOperation.Fetch)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var localUnion = Fixture(@"
+    public class Auth
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create | AuthorizeFactoryOperation.Fetch)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        // [Remote] only on the interface's declaration; the class restates the check without it.
+        var remoteOnInterface = Fixture(@"
+    public interface IChecks
+    {
+        [Remote]
+        [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+        bool CanRead(string key);
+    }
+    public class Auth : IChecks
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var expected = GeneratedFactory(remoteUnion, "TargetFactory");
+
+        Assert.NotEqual(expected, GeneratedFactory(localUnion, "TargetFactory"));
+        Assert.Equal(expected, GeneratedFactory(remoteOnInterface, "TargetFactory"));
+    }
+
+    [Fact]
+    public void RestatedCheck_DifferingOnlyInNullableAnnotation_IsOneCheck()
+    {
+        static string Source(string authDeclarations) => Usings + @"
+#nullable enable
+namespace TestNamespace
+{
+" + authDeclarations + @"
+    [Factory]
+    [AuthorizeFactory<Auth>]
+    public partial class Target
+    {
+        public string Key { get; set; } = """";
+
+        [Create]
+        public void Create(string? key) { Key = key ?? """"; }
+    }
+}
+";
+
+        var declared = Source(@"
+    public class Auth
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+        public bool CanRead(string? key) => true;
+    }
+");
+
+        var restated = Source(@"
+    public abstract class AuthBase
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+        public virtual bool CanRead(string key) => false;
+    }
+    public class Auth : AuthBase
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+        public override bool CanRead(string? key) => true;
+    }
+");
+
+        var expected = GeneratedFactory(declared, "TargetFactory");
+        var actual = GeneratedFactory(restated, "TargetFactory");
+
+        Assert.Contains("authorized = auth.CanRead(key);", expected);
+        Assert.Equal(expected, actual);
     }
 
     [Fact]

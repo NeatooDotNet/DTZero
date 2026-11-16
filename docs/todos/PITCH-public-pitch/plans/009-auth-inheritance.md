@@ -42,6 +42,7 @@ Make the generator honor authorization checks an auth type inherits. This is the
 - The generator stays on `netstandard2.0`.
 - A check reachable by more than one inheritance path runs once.
 - A check overridden or re-implemented in a derived auth class runs the derived version.
+- A restated check never loses an operation (Keith, 2026-11-16).
 - No new public API and no new attribute.
 
 ---
@@ -54,6 +55,7 @@ Make the generator honor authorization checks an auth type inherits. This is the
 4. Bump the version to 2.0.1 and write its release notes.
 5. Report a check the generator cannot enforce as a build error, where it is now dropped without a word.
 6. Enforce checks declared on the interfaces a class auth type implements.
+7. Combine the operations of a check declared in more than one place.
 
 ---
 
@@ -67,6 +69,7 @@ Make the generator honor authorization checks an auth type inherits. This is the
 - [x] A check declared in a referenced assembly fails the build with a diagnostic that names it `[unit]`
 - [x] A check declared on an interface a class auth type implements is enforced through that class `[integration]`
 - [x] A check the auth type cannot call fails the build with a diagnostic, and no call is generated for it `[unit]`
+- [x] A check declared in more than one place runs for the operations of every declaration, once per operation `[integration]`
 - [x] Every authorization test that existed before the change still passes unchanged `[explicit-skip: covered by the gate logs]`
 - [x] Both solutions build and test green `[explicit-skip: covered by the gate logs]`
 
@@ -87,7 +90,7 @@ Make the generator honor authorization checks an auth type inherits. This is the
 
 ## Test Evidence
 
-Logs of the final state: `reviews/009-impl3-build.log`, `reviews/009-impl3-test.log`. UnitTests 871 to 889, IntegrationTests 664 to 686 (5 skipped), Design.Tests 187 unchanged, per framework. Integration tests are in `src/Tests/DTZero.IntegrationTests/Authorization/AuthInheritanceTests.cs` on the client/server containers; unit tests are under `src/Tests/DTZero.UnitTests`.
+Logs of the final state: `reviews/009-impl4-build.log`, `reviews/009-impl4-test.log`. UnitTests 871 to 895, IntegrationTests 664 to 690 (5 skipped), Design.Tests 187 unchanged, per framework. Integration tests are in `src/Tests/DTZero.IntegrationTests/Authorization/AuthInheritanceTests.cs` on the client/server containers; unit tests are under `src/Tests/DTZero.UnitTests`.
 
 | Acceptance bullet | Test | Tier |
 |---|---|---|
@@ -97,8 +100,9 @@ Logs of the final state: `reviews/009-impl3-build.log`, `reviews/009-impl3-test.
 | Two paths, runs once | `Diamond_CheckRunsOnce_PerFetch`, `Diamond_CheckRunsOnce_PerCreateAndPerCanCreate` | integration, confirmed |
 | Override runs the derived version | `Override_WithoutAttribute_RunsTheDerivedVersion`, `Override_WithRestatedAttribute_RunsTheDerivedVersion` | integration, confirmed |
 | Referenced-assembly check fails the build | `NF0107_CheckInheritedFromInterfaceInReferencedAssembly_ReportsError`, `NF0107_CheckInheritedFromAbstractBaseClassInReferencedAssembly_ReportsError` (`Diagnostics/NF0107Tests.cs`) | unit, confirmed |
-| Interface a class auth type implements | `ImplementedInterface_Check_RefusesFetchAndCreate`, `ImplementedInterface_Checks_Allow_AndEachRunsOncePerOperation`, `ImplementedInterface_ClassRestatedAttribute_Wins` | integration, confirmed |
+| Interface a class auth type implements | `ImplementedInterface_Check_RefusesFetchAndCreate`, `ImplementedInterface_Checks_Allow_AndEachRunsOncePerOperation` | integration, confirmed |
 | Not callable fails the build, no call generated | `NF0108_AttributedInterfaceMethod_ImplementedExplicitly_ReportsError_AndGeneratesNoCall`, `NF0108_AttributeOnExplicitImplementation_ReportsError_AndGeneratesNoCall` (`Diagnostics/NF0108Tests.cs`) | unit, confirmed |
+| Declared in more than one place, operations combined | `Union_ClassRestatesInterfaceCheck_BothOperationsEnforced_OnceEach`, `Union_DerivedInterfaceRestatesBaseInterfaceCheck_BothOperationsEnforced_OnceEach`, `Union_OverrideRestatedWithAnotherOperation_BothOperationsEnforced_OnceEach_AsTheDerivedVersion`, `Union_ClassImplementsTwoUnrelatedInterfacesDeclaringTheCheck_BothOperationsEnforced_OnceEach` | integration, confirmed |
 
 Also added: interface-factory and static-factory coverage, and `InheritedAuthEmissionTests` (an inherited check generates the same factory code as a declared one).
 
@@ -106,9 +110,18 @@ Also added: interface-factory and static-factory coverage, and `InheritedAuthEmi
 
 ## Gate Record
 
+- Test review round 1, 2026-11-16, `reviews/009-test-review.md`: APPROVED, no veto-tier finding, no callout. Not triaged (tech-debt or theoretical): the emission tests do not assert the generated code compiles; three diagnostic branches have no test.
+- Code review, 2026-11-16, `reviews/009-code-review.md`: DECISION NEEDED. A restated check replaced the inherited operations, which then went unchecked. Keith ruled the same day: operations combine, a restatement never removes one. Step 7 implements it.
+  - Callout 1 (two unrelated interfaces on a class auth type, one set of operations dropped): fixed by Step 7.
+  - Callout 2 (release notes missed an auth type in a referenced assembly, and a concrete base whose override now runs): release notes corrected.
+  - Theoretical, taken anyway: the check key ignores nullable reference annotations.
+
 ---
 
 ## Plan Amendments
+
+- 2026-11-16, Step 7 added after the code review and the ruling. This replaces the "most-derived declaration is kept" rule below for operations: declarations of one check are grouped, the call binds to the most-derived member, and the operations are the union of every in-source declaration. The combined check is `[Remote]` if any declaration is, matching how the model builder already combines remoteness across checks. A referenced-assembly declaration is NF0107 unless in-source declarations cover its operations.
+- 2026-11-16, tests changed in Step 7 (all written earlier in this plan; the ruling changed the intent they pinned): `ImplementedInterface_ClassRestatedAttribute_Wins` claimed the restatement replaced the interface's operation; it is now `ImplementedInterface_ClassRestatement_CombinesOperations_RefusesBoth` and claims both are refused. `ImplementedInterface_Checks_Allow_AndEachRunsOncePerOperation` and `ImplementedInterface_ClientCanMethods_AnswerFromTheImplementedChecks` each had one expectation moved to the combined rule. The `restatedOnClass` variant left `ClassImplementingAttributedInterface_GeneratesAsCheckDeclaredOnClass` for the new `RestatedCheck_GeneratesAsOneDeclarationNamingTheUnionOfOperations`.
 
 - 2026-11-16, Steps 1 and 2: one change in the transform covers class, interface and static factories; no renderer changed. A check found twice by name and parameter types is kept once, the most-derived declaration that carries the attribute. A refusal message now names the auth type the factory uses.
 - 2026-11-16, Step 5 added: a check with no source declaration (a base in a referenced assembly) was still dropped with only a debug message. It is now error NF0107.

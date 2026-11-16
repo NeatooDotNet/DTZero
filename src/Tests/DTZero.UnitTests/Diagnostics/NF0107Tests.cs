@@ -136,6 +136,44 @@ namespace TestNamespace
     }
 
     [Fact]
+    public void NF0107_ReferencedDeclarationNamesAnOperationTheSourceRestatementDoesNotCover_ReportsError()
+    {
+        // The referenced interface declares the check for Read (Create and Fetch); the class
+        // restates it in source for Create only, so Fetch is not checked by any source declaration.
+        var reference = DiagnosticTestHelper.EmitReference(SharedInterface, "SharedAuthInterfaceNotCovered");
+        var source = ClassTarget(@"
+    public class Auth : SharedAuth.ISharedReadAuth
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        var diagnostic = Assert.Single(NF0107(source, reference));
+
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("'CanRead' declared on 'SharedAuth.ISharedReadAuth'", diagnostic.GetMessage(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NF0107_ReferencedDeclarationCoveredBySourceRestatement_NoError()
+    {
+        // The source restatement checks every operation the referenced declaration names. Read
+        // applies to Create, Fetch and Execute operations (FactoryOperation includes Read in each),
+        // so all three are restated; Create | Fetch alone would leave Execute and raise NF0107.
+        var reference = DiagnosticTestHelper.EmitReference(SharedInterface, "SharedAuthInterfaceCovered");
+        var source = ClassTarget(@"
+    public class Auth : SharedAuth.ISharedReadAuth
+    {
+        [AuthorizeFactory(AuthorizeFactoryOperation.Create | AuthorizeFactoryOperation.Fetch | AuthorizeFactoryOperation.Execute)]
+        public bool CanRead(string key) => true;
+    }
+", "Auth");
+
+        Assert.Empty(NF0107(source, reference));
+    }
+
+    [Fact]
     public void NF0107_AuthTypeItselfInReferencedAssembly_ReportsError()
     {
         var reference = DiagnosticTestHelper.EmitReference(SharedAuthClass, "SharedAuthClass");

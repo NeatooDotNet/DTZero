@@ -225,8 +225,8 @@ public partial class BaseClassCheckTarget
 #region Class auth type - checks declared on interfaces the class implements
 
 /// <summary>
-/// Implemented by the auth class directly. CanFetchRestatedOnClass is declared here for Fetch, but
-/// the class restates it with [AuthorizeFactory] for Create, and the class's declaration wins.
+/// Implemented by the auth class directly. CanFetchRestatedOnClass is declared here for Fetch, and
+/// the class restates it with [AuthorizeFactory] for Create: the check runs for both.
 /// </summary>
 public interface IImplementedChecks
 {
@@ -281,6 +281,140 @@ public class ImplementedChecksAuth(AuthInheritanceLog log) : ImplementedChecksBa
 [Factory]
 [AuthorizeFactory<ImplementedChecksAuth>]
 public partial class ImplementedChecksTarget
+{
+    public string Key { get; set; } = "";
+
+    [Create]
+    public void Create(string key)
+    {
+        Key = key;
+    }
+
+    [Remote, Fetch]
+    internal void Fetch(string key)
+    {
+        Key = key;
+    }
+}
+
+#endregion
+
+#region Restated checks - declarations of one check combine their operations
+
+// Each target below declares one check, CanRestated(string key), at two places in the auth
+// type's hierarchy: one declaration for Create, the other for Fetch. The check runs once for
+// both operations; neither declaration removes the other's operation.
+
+public interface IRestatedRootChecks
+{
+    [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+    bool CanRestated(string key);
+}
+
+/// <summary>Derived interface restating the base interface's check for another operation.</summary>
+public interface IRestatedInterfaceAuth : IRestatedRootChecks
+{
+    [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+    new bool CanRestated(string key);
+}
+
+public class RestatedInterfaceAuth(AuthInheritanceLog log) : IRestatedInterfaceAuth
+{
+    public bool CanRestated(string key)
+    {
+        log.Record($"RestatedInterfaceAuth.CanRestated:{key}");
+        return key != AuthInheritanceKeys.Denied;
+    }
+}
+
+[Factory]
+[AuthorizeFactory<IRestatedInterfaceAuth>]
+public partial class RestatedInterfaceTarget
+{
+    public string Key { get; set; } = "";
+
+    [Create]
+    public void Create(string key)
+    {
+        Key = key;
+    }
+
+    [Remote, Fetch]
+    internal void Fetch(string key)
+    {
+        Key = key;
+    }
+}
+
+public abstract class RestatedOverrideBase(AuthInheritanceLog log)
+{
+    protected AuthInheritanceLog Log { get; } = log;
+
+    [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+    public virtual bool CanRestated(string key)
+    {
+        Log.Record($"RestatedOverrideBase.CanRestated:{key}");
+        return true;
+    }
+}
+
+/// <summary>Override restating the abstract base's check for another operation.</summary>
+public class RestatedOverrideAuth(AuthInheritanceLog log) : RestatedOverrideBase(log)
+{
+    [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+    public override bool CanRestated(string key)
+    {
+        Log.Record($"RestatedOverrideAuth.CanRestated:{key}");
+        return key != AuthInheritanceKeys.Denied;
+    }
+}
+
+[Factory]
+[AuthorizeFactory<RestatedOverrideAuth>]
+public partial class RestatedOverrideTarget
+{
+    public string Key { get; set; } = "";
+
+    [Create]
+    public void Create(string key)
+    {
+        Key = key;
+    }
+
+    [Remote, Fetch]
+    internal void Fetch(string key)
+    {
+        Key = key;
+    }
+}
+
+public interface ISiblingCreateChecks
+{
+    [AuthorizeFactory(AuthorizeFactoryOperation.Create)]
+    bool CanRestated(string key);
+}
+
+public interface ISiblingFetchChecks
+{
+    [AuthorizeFactory(AuthorizeFactoryOperation.Fetch)]
+    bool CanRestated(string key);
+}
+
+/// <summary>
+/// Implements two unrelated interfaces that declare the same check, with one public method.
+/// </summary>
+public class SiblingChecksAuth(AuthInheritanceLog log) : ISiblingCreateChecks, ISiblingFetchChecks
+{
+    public bool CanRestated(string key)
+    {
+        log.Record($"SiblingChecksAuth.CanRestated:{key}");
+        return key != AuthInheritanceKeys.Denied;
+    }
+}
+
+[Factory]
+[AuthorizeFactory<SiblingChecksAuth>]
+public partial class SiblingChecksTarget
 {
     public string Key { get; set; } = "";
 

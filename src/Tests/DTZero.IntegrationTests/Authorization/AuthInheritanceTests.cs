@@ -331,13 +331,14 @@ public class AuthInheritanceTests
         Assert.NotNull(fetched);
         Assert.NotNull(created);
 
-        // Fetch: the Read check and the base-class interface's Fetch check (reachable through
-        // the base class and the class's own interface list), once each. Not the restated
-        // check: the class restated it for Create only.
+        // Fetch: the Read check, the base-class interface's Fetch check (reachable through the
+        // base class and the class's own interface list), and the restated check, which runs for
+        // the interface's Fetch and the class's Create; once each.
         string[] fetchExpected =
         [
             $"ImplementedChecksAuth.CanReadImplemented:{fetchKey}",
             $"ImplementedChecksBase.CanFetchViaBase:{fetchKey}",
+            $"ImplementedChecksAuth.CanFetchRestatedOnClass:{fetchKey}",
         ];
         Assert.Equal(fetchExpected.Order(StringComparer.Ordinal), Log(server).CallsFor(fetchKey).Order(StringComparer.Ordinal));
 
@@ -350,13 +351,14 @@ public class AuthInheritanceTests
     }
 
     [Fact]
-    public async Task ImplementedInterface_ClassRestatedAttribute_Wins()
+    public async Task ImplementedInterface_ClassRestatement_CombinesOperations_RefusesBoth()
     {
         var (client, _, _) = Scopes();
         var factory = client.ServiceProvider.GetRequiredService<IImplementedChecksTargetFactory>();
 
-        // The interface declares the check for Fetch; the class restates it for Create.
-        Assert.NotNull(await factory.Fetch(AuthInheritanceKeys.DeniedByRestatement));
+        // The interface declares the check for Fetch; the class restates it for Create. The
+        // restatement adds Create and keeps Fetch.
+        Assert.Null(await factory.Fetch(AuthInheritanceKeys.DeniedByRestatement));
         Assert.Null(factory.Create(AuthInheritanceKeys.DeniedByRestatement));
     }
 
@@ -369,10 +371,94 @@ public class AuthInheritanceTests
 
         Assert.False(factory.CanFetch(AuthInheritanceKeys.Denied).HasAccess);
         Assert.False(factory.CanFetch(AuthInheritanceKeys.DeniedViaBaseInterface).HasAccess);
-        Assert.True(factory.CanFetch(AuthInheritanceKeys.DeniedByRestatement).HasAccess);
+        Assert.False(factory.CanFetch(AuthInheritanceKeys.DeniedByRestatement).HasAccess);
         Assert.False(factory.CanCreate(AuthInheritanceKeys.DeniedByRestatement).HasAccess);
         Assert.True(factory.CanFetch(allowedKey).HasAccess);
         Assert.True(factory.CanCreate(allowedKey).HasAccess);
+    }
+
+    // ========================================================================
+    // A check declared at more than one place runs once per operation, for the
+    // union of every declaration's operations. A restatement never narrows.
+    // Each target declares CanRestated once for Create and once for Fetch.
+    // ========================================================================
+
+    /// <summary>Asserts the check refuses both operations and runs once for each, as <paramref name="ranAs"/>.</summary>
+    private static async Task AssertUnionEnforced(
+        IServiceScope client,
+        IServiceScope server,
+        Func<string, Task<object?>> fetch,
+        Func<string, object?> create,
+        string ranAs)
+    {
+        Assert.Null(await fetch(AuthInheritanceKeys.Denied));
+        Assert.Null(create(AuthInheritanceKeys.Denied));
+
+        var fetchKey = NewKey();
+        var createKey = NewKey();
+
+        Assert.NotNull(await fetch(fetchKey));
+        Assert.NotNull(create(createKey));
+
+        Assert.Equal([$"{ranAs}:{fetchKey}"], Log(server).CallsFor(fetchKey));
+        Assert.Equal([$"{ranAs}:{createKey}"], Log(client).CallsFor(createKey));
+    }
+
+    [Fact]
+    public async Task Union_ClassRestatesInterfaceCheck_BothOperationsEnforced_OnceEach()
+    {
+        var (client, server, _) = Scopes();
+        var factory = client.ServiceProvider.GetRequiredService<IImplementedChecksTargetFactory>();
+
+        Assert.Null(await factory.Fetch(AuthInheritanceKeys.DeniedByRestatement));
+        Assert.Null(factory.Create(AuthInheritanceKeys.DeniedByRestatement));
+
+        var fetchKey = NewKey();
+        var createKey = NewKey();
+        Assert.NotNull(await factory.Fetch(fetchKey));
+        Assert.NotNull(factory.Create(createKey));
+
+        Assert.Equal(1, Log(server).CallsFor(fetchKey).Count(c => c == $"ImplementedChecksAuth.CanFetchRestatedOnClass:{fetchKey}"));
+        Assert.Equal(1, Log(client).CallsFor(createKey).Count(c => c == $"ImplementedChecksAuth.CanFetchRestatedOnClass:{createKey}"));
+    }
+
+    [Fact]
+    public async Task Union_DerivedInterfaceRestatesBaseInterfaceCheck_BothOperationsEnforced_OnceEach()
+    {
+        var (client, server, _) = Scopes();
+        var factory = client.ServiceProvider.GetRequiredService<IRestatedInterfaceTargetFactory>();
+
+        await AssertUnionEnforced(client, server,
+            async key => await factory.Fetch(key),
+            key => factory.Create(key),
+            "RestatedInterfaceAuth.CanRestated");
+    }
+
+    [Fact]
+    public async Task Union_OverrideRestatedWithAnotherOperation_BothOperationsEnforced_OnceEach_AsTheDerivedVersion()
+    {
+        var (client, server, _) = Scopes();
+        var factory = client.ServiceProvider.GetRequiredService<IRestatedOverrideTargetFactory>();
+
+        await AssertUnionEnforced(client, server,
+            async key => await factory.Fetch(key),
+            key => factory.Create(key),
+            "RestatedOverrideAuth.CanRestated");
+
+        Assert.DoesNotContain(Log(server).Calls, c => c.StartsWith("RestatedOverrideBase.", StringComparison.Ordinal));
+        Assert.DoesNotContain(Log(client).Calls, c => c.StartsWith("RestatedOverrideBase.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Union_ClassImplementsTwoUnrelatedInterfacesDeclaringTheCheck_BothOperationsEnforced_OnceEach()
+    {
+        var (client, server, _) = Scopes();
+        var factory = client.ServiceProvider.GetRequiredService<ISiblingChecksTargetFactory>();
+
+        await AssertUnionEnforced(client, server,
+            async key => await factory.Fetch(key),
+            key => factory.Create(key),
+            "SiblingChecksAuth.CanRestated");
     }
 
     // ========================================================================

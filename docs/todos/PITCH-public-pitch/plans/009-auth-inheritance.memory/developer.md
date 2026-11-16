@@ -16,7 +16,10 @@ Current step: Implementation complete, both solutions green; awaiting test revie
 
 - Third pass: class T now reads checks on every interface in T.AllInterfaces (after the class hierarchy, so class declarations win); interface checks T cannot call (explicit impl, attribute on explicit impl, default interface impl) -> NF0108 Error, no call generated. Tests: AuthInheritanceTests ImplementedInterface_* (5), InheritedAuthEmissionTests.ClassImplementingAttributedInterface_GeneratesAsCheckDeclaredOnClass, NF0108Tests (5), NF0107Tests class-implements-metadata-interface (1). Logs `009-impl3-*.log`: Unit 889, Integration 686/5, Design 187/1. Existing generated output byte-identical to the snapshot.
 
+- Fourth pass (user ruling): restated checks COMBINE operations (union), never narrow. GetAuthMethodsRecursive groups declarations by nullable-insensitive signature (FullyQualifiedFormat), representative = most-derived declaration in source, others in `restatements`. [Remote] on any declaration -> combined check remote (OR, as the builder already ORs IsRemote across auth methods). Metadata restatement -> NF0107 unless source union covers every factory operation it names (Read covers Create, Fetch AND Execute). Callability (NF0108) now checked before grouping. Logs `009-impl4-*.log`: Unit 895, Integration 690/5, Design 187/1; pre-existing generated output byte-identical.
+
 ## Mistakes to Avoid
+- Coverage fixtures: `Read` applies to Execute operations too (FactoryOperation.Execute = Read | Execute).
 - Asserting zero errors on `RunGenerator` output compilation (see above).
 
 ## User Corrections
