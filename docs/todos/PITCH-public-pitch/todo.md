@@ -24,9 +24,9 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 - [x] **AC-3** · Required — The README states the problem, the audience and when not to use DTZero before any code.
 - [x] **AC-4** · Required — Every docs page says why its component exists and when to leave it out.
 - [x] **AC-5** · Required — The skill carries the same reasons as the docs.
-- [ ] **AC-6** · Required — A launch plan lists where and how to generate interest.
+- [x] **AC-6** · Required — A launch plan lists where and how to generate interest.
 - [ ] **AC-7** · Required — Every C# sample is still a Design-pinned snippet and both solutions are green.
-- [ ] **AC-8** · Optional — Documentation issues #2, #37 and #39 are closed along the way.
+- [x] **AC-8** · Optional — Documentation issues #2, #37 and #39 are closed along the way. Closed 2026-11-18 with Keith's approval.
 
 ## Out of Scope
 
@@ -47,7 +47,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 | 004 | [004-narrative-docs](./plans/004-narrative-docs.md) | Narrative docs carry the why | AC-4, AC-7 | Done | #44 |
 | 005 | [005-authorization](./plans/005-authorization.md) | Authorization and trust | AC-4, AC-7 | Done | #46 |
 | 006 | [006-skill](./plans/006-skill.md) | The skill carries the same reasons | AC-5, AC-7 | Done | #48 |
-| 007 | [007-launch-plan](./plans/007-launch-plan.md) | A plan for generating interest | AC-6 | Draft | — |
+| 007 | [007-launch-plan](./plans/007-launch-plan.md) | A plan for generating interest | AC-6 | Done | #49 |
 | 008 | [008-component-docs](./plans/008-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Done | #47 |
 | 009 | [009-auth-inheritance](./plans/009-auth-inheritance.md) | Inherited authorization checks are enforced | AC-4, AC-7 | Done | #45 |
 
@@ -81,6 +81,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 - PITCH-004 Step 5 test review — document-only plan with no behavioral bullets and no source change (2026-11-15).
 - PITCH-008 Step 5 test review — document-only plan with no behavioral bullets and no source change (2026-11-18).
 - PITCH-006 Step 5 test review — document-only plan with no behavioral bullets and no source change (2026-11-18).
+- PITCH-007 Step 5 test review — document-only plan with no behavioral bullets (2026-11-18).
 - Step 1 fan-out reconnaissance — the user asked for research inside each plan, not up front (2026-11-13).
 
 ---
