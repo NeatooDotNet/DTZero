@@ -1,0 +1,119 @@
+# Make DTZero's Public Case
+
+**ID:** PITCH
+**Type:** Enhancement
+**Status:** Complete
+**Created:** 2026-11-13
+**Last Updated:** 2026-11-18
+**Initial split:** 7 plans
+**Plan cap:** 11
+**Arc branch:** `PITCH`
+**Related:** Adopts documentation issues #2, #37 and #39 under AC-8. No sibling arcs open (checked 2026-11-13). The verdict and the launch plan live in this tracked folder and so are public (Keith, 2026-11-13).
+**Standing orders:** attended
+
+---
+
+## Goal
+
+Decide, with evidence, whether DTZero is useful to anyone but its author now that AI writes boilerplate cheaply. If it is, make the README, the docs and the skill argue that case: why the library exists, why each component exists, how each DDD concept maps onto it, and when not to use it. Finish with a plan for generating interest. Research happens inside each plan, just before that plan's work, so questions reach the user one small set at a time.
+
+## Acceptance Criteria
+
+- [x] **AC-1** · Required — A written verdict names DTZero's audience, its alternatives and its value in AI-assisted development, and the user has ruled on it.
+- [x] **AC-2** · Required — A map ties each DDD concept to a DTZero component or marks it as not DTZero's job, and the user has confirmed it.
+- [x] **AC-3** · Required — The README states the problem, the audience and when not to use DTZero before any code.
+- [x] **AC-4** · Required — Every docs page says why its component exists and when to leave it out.
+- [x] **AC-5** · Required — The skill carries the same reasons as the docs.
+- [x] **AC-6** · Required — A launch plan lists where and how to generate interest.
+- [x] **AC-7** · Required — Every C# sample is still a Design-pinned snippet and both solutions are green.
+- [x] **AC-8** · Optional — Documentation issues #2, #37 and #39 are closed along the way. Closed 2026-11-18 with Keith's approval.
+
+## Out of Scope
+
+- Library code changes beyond new Design sample regions and the tests that pin them. One exception, approved 2026-11-16: the generator fix in PITCH-009.
+- Carrying out the launch: posting, announcing, submitting anywhere.
+- The package icon (#40) and the downstream migration (Neatoo#126).
+- LazyLoad: nothing is written against it (CLAUDE.md, VisionAlignment R-K).
+
+---
+
+## Plan Index
+
+| # | File | Title (≤ 8 words) | Serves | Status | PR |
+|---|------|-------|--------|--------|----|
+| 001 | [001-verdict](./plans/001-verdict.md) | The verdict: is DTZero useful to others | AC-1 | Done | #41 |
+| 002 | [002-ddd-map](./plans/002-ddd-map.md) | Map DDD concepts to DTZero components | AC-2 | Done | #42 |
+| 003 | [003-readme](./plans/003-readme.md) | Rewrite the README around the case | AC-3, AC-7 | Done | #43 |
+| 004 | [004-narrative-docs](./plans/004-narrative-docs.md) | Narrative docs carry the why | AC-4, AC-7 | Done | #44 |
+| 005 | [005-authorization](./plans/005-authorization.md) | Authorization and trust | AC-4, AC-7 | Done | #46 |
+| 006 | [006-skill](./plans/006-skill.md) | The skill carries the same reasons | AC-5, AC-7 | Done | #48 |
+| 007 | [007-launch-plan](./plans/007-launch-plan.md) | A plan for generating interest | AC-6 | Done | #49 |
+| 008 | [008-component-docs](./plans/008-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Done | #47 |
+| 009 | [009-auth-inheritance](./plans/009-auth-inheritance.md) | Inherited authorization checks are enforced | AC-4, AC-7 | Done | #45 |
+
+---
+
+## Punchlist
+
+- [x] Replace "cascade" as the name for the save chain in the `collection-factory-basic` source comment and in `docs/factory-operations.md` (four places) · `src/Design/Design.Domain/Entities/OrderLine.cs`, `docs/factory-operations.md` · the word appears only as "what an ORM calls it" · AC-4 (PITCH-005) · source comment in PITCH-005, docs and CLAUDE-DESIGN in PITCH-008; the skill is PITCH-006
+
+- [x] Decide whether the public endpoints carry `RequireAuthorization`, and show an authorized aggregate reached through a public endpoint so "no entry point can miss the rule" has a test · `PublicApi/PublicOrderApi.cs` · decided with the user; if shown, an HTTP test pins it · AC-7 (fits PITCH-005, authorization) · done in PITCH-005: the authorized aggregate is reached through a public endpoint and pinned; `RequireAuthorization` is left to the application and the page says so
+
+## Dismissed
+
+## Parked
+
+- NeatooDotNet/Neatoo#127 · Neatoo: re-run rules on the server before a write, by mechanism or option · PITCH-001 verdict, sixth ruling
+
+---
+
+## Discovery Log
+
+- 2026-11-15 · Re-split · AC-4 · PITCH-005 became two plans: 005 (authorization and trust, with Design samples) and 008 (the remaining component pages, prose). The authorization work needs code and a test review; the rest does not. Eight plans of a cap of eleven.
+- 2026-11-15 · Ruling · AC-3 · Keith allowed the README to state the production application's counts and to link the company site, in chat: "you can even point to our company site". This widens PITCH-001's counts-only constraint for that one link.
+- 2026-11-16 · Scope · AC-4 · The PITCH-005 probe found that the generator drops an authorization check an auth interface inherits, with no diagnostic, and cannot resolve one declared on an abstract base class. Keith ruled: fix the generator in this todo (PITCH-009), ahead of the authorization page. Out of Scope amended. Nine plans of a cap of eleven.
+- 2026-11-18 · Audit · AC-4, AC-5 · The close-out audit graded C on two items and listed four callouts. Both items and three callouts were fixed on `PITCH-closeout`; the fourth, publishing 2.0.1, is put to Keith. See Close-Out Audit.
+
+---
+
+## Skipped Steps
+
+- PITCH-001 Step 5 test review — document-only plan with no behavioral bullets (2026-11-13).
+- PITCH-002 Step 5 test review — document-only plan with no behavioral bullets (2026-11-13).
+- PITCH-004 Step 5 test review — document-only plan with no behavioral bullets and no source change (2026-11-15).
+- PITCH-008 Step 5 test review — document-only plan with no behavioral bullets and no source change (2026-11-18).
+- PITCH-006 Step 5 test review — document-only plan with no behavioral bullets and no source change (2026-11-18).
+- PITCH-007 Step 5 test review — document-only plan with no behavioral bullets (2026-11-18).
+- Step 1 fan-out reconnaissance — the user asked for research inside each plan, not up front (2026-11-13).
+
+---
+
+## Sibling Todos
+
+---
+
+## Close-Out Audit
+
+- 2026-11-18, `reviews/close-out-audit.md`: grade C. Veto-tier: `docs/save-operation.md` still headed the save chain "Cascading to Children"; every earlier check searched for "cascade", which does not occur in "Cascading". AC-5 partly met: the skill lacked the per-component leave-outs and the trimming cost.
+- Fixed on `PITCH-closeout`: the heading; a "When to leave a piece out" table in `SKILL.md` and "What it costs" in the skill's trimming reference; the CSLA sentence in the README and `the-problem` no longer claims compile-time generation as a difference (R1); the release-notes index matches the v2.0.1 page (R2); the README no longer says authorization runs on the server for every call (R3).
+- Left for Keith (R4 and two unverified claims): publishing 2.0.1, whose notes carry a date and a NuGet link; "used in production with WPF"; both are in the arc PR body.
+- 2026-11-18, re-audit: grade A at `861dcba`. Two callouts, both then fixed: the skill lacked two authorization leave-outs (a type reached only from server code; authorization is not a verdict), and a Discovery Log line overstated what was fixed.
+
+---
+
+## Docs & Retro
+
+**Documentation check.** Each doc change shipped in the plan that changed the behaviour or the argument: the generator fix and its release notes in PITCH-009, the authorization pages and their Design samples in PITCH-005, the skill in PITCH-006. No doc debt is parked. Two statements wait on Keith and are listed in the arc PR: "used in production with WPF" on two pages, and the release date in the v2.0.1 notes, which is right only once 2.0.1 is published.
+
+**Retro.** Nine plans against an initial split of seven and a cap of eleven; both additions came from findings, not from drift (the authorization page split from the component pages, and a probe for a Design sample found the generator dropping inherited authorization checks). Two punchlist rows, both worked; one parked issue; nothing dismissed. Three lessons. First, a sample written to prove a docs claim found a security bug no test had: writing the claim as a pinned sample is worth its cost. Second, the generator fix needed five passes because each review found another way a check could be dropped without a diagnostic; a rule of "enforce it or report it, never drop it" stated in the plan up front would have shortened that. Third, the dropped word "cascade" survived to the close-out audit in a heading because every check searched the whole word; a bulk wording change is checked by its stem. The second and third are already covered by the global rule on verifying a bulk change with a different method; nothing new is routed.
+
+---
+
+## Results / Conclusions
+
+- **The verdict:** DTZero is useful to others, for a narrow audience: a .NET client (Blazor WebAssembly or WPF) in front of ASP.NET Core, one team owning both tiers, a domain with behaviour. `verdict.md` holds the evidence and Keith's rulings.
+- **The README, `docs/` and the skill** state the problem, the audience and when not to use DTZero, and each component page says why it exists and when to leave it out. `ddd-map.md` ties each DDD concept to a component.
+- **Version 2.0.1:** authorization checks declared on a base class or an inherited interface are now enforced, and three diagnostics (NF0107 to NF0109) report the cases the generator cannot enforce. Not yet published.
+- **`launch-plan.md`** lists what to make ready, what to write and where to take it. Nothing in it has been carried out.
+- **Close-out audit:** C, then A after fixes (`reviews/close-out-audit.md`).
+- **Not verified by anyone:** that generated output for existing targets is byte-identical after the generator change (the implementer's report only); the new generator tests were never run against the old generator; the last pass of PITCH-009 (NF0109) had no review of its own; the revised skill has not been tried in a fresh session.

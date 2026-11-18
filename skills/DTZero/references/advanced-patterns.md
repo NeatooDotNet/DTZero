@@ -112,6 +112,88 @@ bool CanWrite(IParamAuthOrder target);
 
 **CanXxx generation with target parameters:** When Write auth has a target parameter, `CanInsert`/`CanUpdate`/`CanDelete` are **not generated** — the entity isn't available before the write operation. `CanSave` is the exception: two overloads are generated because the caller has the entity in hand when deciding whether to save. `CanSave()` (parameterless) runs only non-target Write auth methods (role checks). `CanSave(target)` runs ALL Write auth methods — both non-target and target-parameterized. `CanCreate`/`CanFetch` are still generated when Read auth is parameterless.
 
+### A shared authorization base
+
+Broad rules that hold for every type are declared once, on a base class:
+
+<!-- snippet: authorization-base -->
+<a id='snippet-authorization-base'></a>
+```cs
+public abstract class AuthorizationBase(ICurrentUser user)
+{
+    protected ICurrentUser User { get; } = user;
+
+    [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+    public bool IsSignedIn() => User.IsAuthenticated;
+
+    [AuthorizeFactory(AuthorizeFactoryOperation.Write)]
+    public bool CanWrite() => User.IsInRole(OrderRoles.Sales);
+}
+```
+<sup><a href='/src/Design/Design.Domain/Aggregates/AuthorizationBase.cs#L41-L52' title='Snippet source file'>snippet source</a> | <a href='#snippet-authorization-base' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+Each type's auth class inherits the base and adds only its own checks:
+
+<!-- snippet: authorization-base-derived -->
+<a id='snippet-authorization-base-derived'></a>
+```cs
+public class QuoteAuth(ICurrentUser user) : AuthorizationBase(user)
+{
+    [AuthorizeFactory(AuthorizeFactoryOperation.Delete)]
+    public bool CanDelete() => User.IsInRole(OrderRoles.Manager);
+}
+```
+<sup><a href='/src/Design/Design.Domain/Aggregates/QuoteAuth.cs#L26-L32' title='Snippet source file'>snippet source</a> | <a href='#snippet-authorization-base-derived' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+The factory names the derived class, because an interface cannot inherit checks from a class:
+
+<!-- snippet: authorization-base-apply -->
+<a id='snippet-authorization-base-apply'></a>
+```cs
+[Factory]
+[AuthorizeFactory<QuoteAuth>]
+internal partial class Quote : IQuote, IFactorySaveMeta, IFactoryOnCompleteAsync
+```
+<sup><a href='/src/Design/Design.Domain/Aggregates/Quote.cs#L36-L40' title='Snippet source file'>snippet source</a> | <a href='#snippet-authorization-base-apply' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+Only the auth type the factory names is registered. What is inherited (since v2.0.1):
+
+- An auth interface inherits the checks of the interfaces it extends. An auth class inherits the checks of its base classes and of the interfaces it implements.
+- An override runs the derived version, once.
+- A check declared again with `[AuthorizeFactory]` in a derived type runs for the operations of both declarations. A restatement never removes an operation. If either declaration is `[Remote]`, the check is remote for all of them.
+- A check the generator cannot enforce fails the build: NF0107 (declared in a referenced assembly), NF0108 (implemented explicitly, so not callable on the auth class), NF0109 (operations not a readable constant).
+- A generic base auth interface is not supported.
+
+### What the client sends is input
+
+The object that arrives in a Save was built on the client. A rule that reads `target.Status`, as `CanWrite(IParamAuthOrder target)` above does, follows whatever the client sent. That is right for guiding the screen and wrong for protecting a record. A rule that protects the record reads the record: the target supplies the id and the store supplies the state.
+
+<!-- snippet: authorization-stored-record -->
+<a id='snippet-authorization-stored-record'></a>
+```cs
+public interface ILockableOrderAuth
+{
+    // [Remote] internal: the store is server-only, and CanSave(target) asks the server
+    [Remote]
+    [AuthorizeFactory(AuthorizeFactoryOperation.Write)]
+    internal Task<bool> CanWrite(ILockableOrder target);
+}
+
+public class LockableOrderAuth(ILockableOrderStore store) : ILockableOrderAuth
+{
+    // The target supplies the id; the stored row supplies the status.
+    public async Task<bool> CanWrite(ILockableOrder target)
+        => await store.FindAsync(target.Id) is not { Status: LockableOrderStatus.Locked };
+}
+```
+<sup><a href='/src/Design/Design.Domain/Aggregates/LockableOrderAuth.cs#L30-L45' title='Snippet source file'>snippet source</a> | <a href='#snippet-authorization-stored-record' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+The store is server-only, so the check is `[Remote] internal`, and `CanSave(target)` asks the server. On the server, trust the caller's identity, the store and the code. Everything on the object is a claim.
+
 ---
 
 ## Authorization with [AspAuthorize]
@@ -180,6 +262,90 @@ internal Task Update()
 <!-- endSnippet -->
 
 `[AspAuthorize]` needs `IAspAuthorize`, which `AddDTZeroAspNetCore` registers; an operation that carries it always runs its check on the server.
+
+---
+
+## A public API over the same factories
+
+`/api/dtzero` carries the object graph and changes whenever the model does. It is for the client that ships with the server. For a caller you do not control, write endpoints by hand. Do not write a second copy of the logic behind them: an endpoint is server code, takes the generated factory by injection, and calls the same domain methods a screen calls.
+
+The contract is a type designed for the outside caller, not the domain object:
+
+<!-- snippet: public-api-contract -->
+<a id='snippet-public-api-contract'></a>
+```cs
+public sealed record PublicOrder(int Id, string Customer, string Status, decimal Total, string Currency, int LineCount)
+{
+    public static PublicOrder From(IOrder order) => new(
+        order.Id, order.CustomerName, order.Status.ToString(),
+        order.Total.Amount, order.Total.Currency, order.Lines.Count);
+}
+```
+<sup><a href='/src/Design/Design.Server/PublicApi/PublicOrderApi.cs#L101-L108' title='Snippet source file'>snippet source</a> | <a href='#snippet-public-api-contract' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+The endpoints load through the factory, read the domain's own verdict, call its verb and save through the factory:
+
+<!-- snippet: public-api-endpoints -->
+<a id='snippet-public-api-endpoints'></a>
+```cs
+public static IEndpointRouteBuilder MapPublicOrderApi(this IEndpointRouteBuilder app)
+{
+    var orders = app.MapGroup("/api/public/orders");
+
+    orders.MapGet("/{id}", async (int id, IOrderFactory factory, CancellationToken ct) =>
+        await factory.Fetch(id, ct) is { } order
+            ? Results.Ok(PublicOrder.From(order))
+            : Results.NotFound());
+
+    orders.MapPost("/{id}/submit", async (int id, IOrderFactory factory, CancellationToken ct) =>
+    {
+        var order = await factory.Fetch(id, ct);
+        if (order is null)
+            return Results.NotFound();
+        if (!order.CanSubmit)   // the domain's rule, not a copy of it
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "The order cannot be submitted.");
+
+        order.Submit();
+        var saved = await factory.Save(order, ct)
+            ?? throw new InvalidOperationException("Saving the order returned nothing.");
+        return Results.Ok(PublicOrder.From(saved));
+    });
+
+    return app;
+}
+```
+<sup><a href='/src/Design/Design.Server/PublicApi/PublicOrderApi.cs#L69-L95' title='Snippet source file'>snippet source</a> | <a href='#snippet-public-api-endpoints' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+An authorized aggregate is under its rules here too. To server code a refused `Fetch` returns `null`, the same as "not found", so an endpoint that wants to answer 403 asks `CanFetch` first:
+
+<!-- snippet: public-api-authorized -->
+<a id='snippet-public-api-authorized'></a>
+```cs
+public static IEndpointRouteBuilder MapPublicAuthorizedOrderApi(this IEndpointRouteBuilder app)
+{
+    var orders = app.MapGroup("/api/public/authorized-orders");
+
+    orders.MapGet("/{id}", async (int id, IAuthorizedOrderFactory factory, CancellationToken ct) =>
+    {
+        if (!factory.CanFetch(ct).HasAccess)   // the order's rules, asked of its factory
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "The caller may not read this order.");
+
+        return await factory.Fetch(id, ct) is { } order
+            ? Results.Ok(PublicAuthorizedOrder.From(order))
+            : Results.NotFound();
+    });
+
+    return app;
+}
+```
+<sup><a href='/src/Design/Design.Server/PublicApi/PublicOrderApi.cs#L134-L153' title='Snippet source file'>snippet source</a> | <a href='#snippet-public-api-authorized' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+In a server that hosts a Blazor WebAssembly client, leave route constraints such as `{id:int}` off these routes. A request that fails the constraint matches no endpoint and gets `index.html` with a 200.
 
 ---
 
@@ -259,7 +425,7 @@ internal void Update(OrderLineRow row)
     MapTo(row);
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L145-L187' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-child' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L146-L188' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-child' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 <!-- snippet: orderline-duality -->
@@ -279,7 +445,7 @@ internal async Task<bool> Fetch(Guid id, [Service] IOrderDbContext db)
     return true;
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L189-L203' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-duality' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L190-L204' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-duality' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 **Key insight:** [Remote] is about *how the method is called*, not *what the type is*.
@@ -402,8 +568,8 @@ internal void Fetch(IEnumerable<OrderLineRow> rows, [Service] IOrderLineFactory 
 }
 
 /// <summary>
-/// The cascade: makes, finds or removes each line's row and hands each live
-/// line its row through the line factory's Save.
+/// Saves the lines: makes, finds or removes each line's row and hands each
+/// live line its row through the line factory's Save.
 /// </summary>
 /// <remarks>
 /// Called by Order.Insert and Order.Update through IOrderLineListFactory.Save,
@@ -448,7 +614,7 @@ public void AddLine(IOrderLine line)
     Add((OrderLine)line);
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L286-L354' title='Snippet source file'>snippet source</a> | <a href='#snippet-collection-factory-basic' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L287-L355' title='Snippet source file'>snippet source</a> | <a href='#snippet-collection-factory-basic' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 `OrderLineRow` is the example's stored row for one line, held in the order row's line collection. The list holds no factory: it takes `IOrderLineFactory` as a method parameter in each operation, so nothing has to survive the round trip.

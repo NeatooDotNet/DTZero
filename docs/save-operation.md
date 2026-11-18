@@ -108,7 +108,7 @@ internal async Task Delete([Service] IOrderDbContext db)
 <sup><a href='/src/Design/Design.Domain/Aggregates/Order.cs#L305-L317' title='Snippet source file'>snippet source</a> | <a href='#snippet-operations-delete' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-### Cascading to Children
+### Saving the Children
 
 One Save on the root writes the whole aggregate, but nothing in the generator walks the graph. The root's Insert and Update call `IOrderLineListFactory.Save(Lines, row.Lines)`, and the list does the rest:
 - it makes a row for each new line;
@@ -207,6 +207,12 @@ public async Task Save_InsertThenUpdate_WritesTheOneRow()
 ```
 <sup><a href='/src/Design/Design.Tests/FactoryTests/SaveTests.cs#L53-L74' title='Snippet source file'>snippet source</a> | <a href='#snippet-save-testing' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
+
+## When to Leave Save Out
+
+- **A read model or a command.** A type with no writes has no `Save`, and does not implement `IFactorySaveMeta`.
+- **A child.** The client does not save a child. The root's `Save` reaches it, because factory methods call factory methods on the server.
+- **Work that is not "store this object's state".** Approving, cancelling or transferring is a verb. Put it on the object and then call `Save`, as `Order.Submit()` does, or make it an `[Execute]` when it spans more than one aggregate.
 
 ## Next Steps
 

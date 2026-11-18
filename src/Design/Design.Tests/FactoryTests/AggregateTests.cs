@@ -3,8 +3,8 @@
 // =============================================================================
 //
 // Tests demonstrating the Order aggregate from the client: a local Create, a
-// remote Fetch, child lines created on the client (R-C), and the save cascade
-// in which each object maps its own row (R-D).
+// remote Fetch, child lines created on the client (R-C), and the save in which
+// each object maps its own row (R-D).
 //
 // Every test runs on the client container, so each call that crosses goes
 // through the serializing stand-in exactly as it would over HTTP.
@@ -291,7 +291,7 @@ public class AggregateTests
     }
 
     /// <summary>
-    /// Verifies the R-D cascade from the client: change a line, remove a line,
+    /// Verifies the R-D save from the client: change a line, remove a line,
     /// add a line, and one added then removed before saving.
     /// </summary>
     /// <remarks>

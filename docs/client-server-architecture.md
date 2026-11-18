@@ -34,6 +34,24 @@ Client                          Server
 
 This is the most important thing to understand: `[Remote]` is not "this method runs on the server." It's "this method is a **client entry point** that crosses to the server." The distinction matters because most server-side methods are *not* entry points — they're called from other server-side code after the boundary has already been crossed.
 
+## Factory Methods Call Factory Methods
+
+The client calls one factory method, and that call crosses. From there, factory methods call factory methods on the server, and nothing else crosses:
+
+```text
+client                      server
+------                      ------
+orderFactory.Save(order) -> Order.Insert                 writes the order's row
+                              lineListFactory.Save       walks the lines
+                                lineFactory.Save         each line writes its own row
+
+orderFactory.Fetch(id)   -> Order.Fetch                  reads the order's row
+                              lineListFactory.Fetch      walks the line rows
+                                lineFactory.Fetch(row)   each line reads its own row
+```
+
+This is why most methods need no `[Remote]`: only the first call in each tree is a client entry point. It is also how an aggregate is loaded and stored as a whole without one class that knows the whole graph. Each object handles its own row and hands the rest to the next factory. Why it is built this way is in [Why DTZero](the-problem.md#the-one-idea-factory-methods-call-factory-methods).
+
 ## When to Use [Remote]
 
 Use `[Remote]` when a call the client makes **has to cross to the server** because the method needs something only the server has: a data store, a server-only service, a secret.
@@ -130,12 +148,12 @@ internal void Update(OrderLineRow row)
     MapTo(row);
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L145-L187' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-child' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L146-L188' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-child' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-The generated `IOrderLineFactory` therefore exposes `Create` to the client and carries the row `Fetch` and `Save` as `internal` members that the order's server-side cascade calls.
+The generated `IOrderLineFactory` therefore exposes `Create` to the client and carries the row `Fetch` and `Save` as `internal` members that the order's own factory methods call on the server.
 
-An entity can also be a root in one context and a child in another. `OrderLine` is a child of `Order`, and a line-detail screen loads one line on its own. The factory-method signature is the difference: the child `Fetch` takes the row its parent's load hands it and stays `internal`; the root `Fetch` takes a key, is a client entry point, and is `[Remote]` (promoted to `public` on the interface):
+Root and child are roles, not kinds of class, so an entity can be a root in one graph and a child in another. `OrderLine` is a child of `Order`, and a line-detail screen loads one line on its own. The factory-method signature is the difference: the child `Fetch` takes the row its parent's load hands it and stays `internal`; the root `Fetch` takes a key, is a client entry point, and is `[Remote]` (promoted to `public` on the interface):
 
 <!-- snippet: orderline-duality -->
 <a id='snippet-orderline-duality'></a>
@@ -154,7 +172,7 @@ internal async Task<bool> Fetch(Guid id, [Service] IOrderDbContext db)
     return true;
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L189-L203' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-duality' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L190-L204' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-duality' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ## Best Practice: Exclude Server Packages from Client Projects

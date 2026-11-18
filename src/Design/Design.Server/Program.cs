@@ -50,12 +50,17 @@
 //
 // No controllers needed - it's all handled by the middleware.
 //
+// MapPublicOrderApi() and MapPublicAuthorizedOrderApi() are not part of that
+// setup. They map a public API for callers outside the application, hand-written
+// over the same generated factories; the reasons are in PublicApi/PublicOrderApi.cs.
+//
 // The SPA fallback comes AFTER all other middleware and route mappings so that
 // API routes (/api/dtzero) are handled first.
 //
 // =============================================================================
 
 using Design.Server;
+using Design.Server.PublicApi;   // for app.MapPublicOrderApi() and MapPublicAuthorizedOrderApi() below
 using DTZero.AspNetCore;   // for app.UseDTZero() below
 
 #region getting-started-server-program
@@ -76,6 +81,10 @@ app.UseAuthorization();
 
 // The DTZero endpoint: one route for every factory call, no controllers
 app.UseDTZero();
+
+// A public API for outside callers: hand-written endpoints over the same factories (PublicApi/)
+app.MapPublicOrderApi();
+app.MapPublicAuthorizedOrderApi();
 
 app.MapFallbackToFile("index.html");
 

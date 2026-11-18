@@ -120,7 +120,7 @@ Callers don't invoke these: they call `factory.Save(order)`, and the factory run
 
 Keep what `Save` returns: `order = await factory.Save(order)`. See [Save Operation](save-operation.md).
 
-Each write handles only its own object's row. An aggregate's children are written by the cascade: the root hands its row's child collection to the list factory's `Save`, and the list makes, finds or removes each child's row and hands each child its own (see [Collection Factories](#collection-factories)). The root flushes once.
+Each write handles only its own object's row. An aggregate's children are written by factory methods calling factory methods: the root hands its row's child collection to the list factory's `Save`, and the list makes, finds or removes each child's row and hands each child its own (see [Collection Factories](#collection-factories)). The root flushes once.
 
 ### Insert
 
@@ -313,7 +313,7 @@ Work that must not join the caller's transaction (email, webhooks, an external a
 
 ## Collection Factories
 
-A `[Factory]` list class is how an aggregate's children are created, loaded and saved. The list's `[Update]` is the cascade, and it is how a child removed on the client reaches the server: the list keeps the removed child, flagged deleted, until the next save removes its row. A plain `List<Child>` has none of that, so use one only for children that are never written.
+A `[Factory]` list class is how an aggregate's children are created, loaded and saved. The list's `[Update]` saves each child through the child's factory, and it is how a child removed on the client reaches the server: the list keeps the removed child, flagged deleted, until the next save removes its row. A plain `List<Child>` has none of that, so use one only for children that are never written.
 
 `OrderLineList`:
 
@@ -342,8 +342,8 @@ internal void Fetch(IEnumerable<OrderLineRow> rows, [Service] IOrderLineFactory 
 }
 
 /// <summary>
-/// The cascade: makes, finds or removes each line's row and hands each live
-/// line its row through the line factory's Save.
+/// Saves the lines: makes, finds or removes each line's row and hands each
+/// live line its row through the line factory's Save.
 /// </summary>
 /// <remarks>
 /// Called by Order.Insert and Order.Update through IOrderLineListFactory.Save,
@@ -388,7 +388,7 @@ public void AddLine(IOrderLine line)
     Add((OrderLine)line);
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L286-L354' title='Snippet source file'>snippet source</a> | <a href='#snippet-collection-factory-basic' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L287-L355' title='Snippet source file'>snippet source</a> | <a href='#snippet-collection-factory-basic' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 - **The list's Create is public and local,** so a root created on the client creates its list there. Its other operations are `internal`: only the root's operations call them, on the server.
@@ -506,6 +506,16 @@ Declare an operation's parameters in this order: **value parameters, then `[Serv
 The generator does not check the order. A class operation still compiles with another order. An `[Execute]` does not: its generated call passes values, then services, then the token, so an out-of-order `[Execute]` fails inside the generated code ([#23](https://github.com/NeatooDotNet/DTZero/issues/23)).
 
 Default values on value parameters are not carried to the generated factory method, so every argument is passed.
+
+## When to Leave Each Out
+
+- **`[Create]`.** A type that is only ever loaded, such as a read model, has none.
+- **`[Fetch]`.** A type that is built and handed back but never stored, such as the result of a calculation, has none.
+- **`[Insert]`, `[Update]`, `[Delete]`.** A read model has none, and so has no `Save`. Declare only the writes the type has.
+- **`[Execute]`.** Leave it out when the work is one object's lifecycle. Then it is a Create, a Fetch or a write.
+- **`[Remote]`.** Leave it off every method that only the server calls: a child's operations, and anything a root's operation calls. Leave it off a Create that needs nothing from the server.
+- **A collection factory.** Children that are never written can sit in a plain `List<T>`.
+- **Lifecycle hooks.** Leave them out unless the same lines would otherwise open or close every operation on the type.
 
 ## Next Steps
 

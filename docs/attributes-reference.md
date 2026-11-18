@@ -2,6 +2,8 @@
 
 Every DTZero attribute: what it marks, and what the generator does with it. The code comes from DTZero's compiled example set, `src/Design`.
 
+For why each attribute exists and what you would write without it, see [DDD Concepts in DTZero](ddd-concepts.md#each-component-and-what-it-replaces). For which to use when, and when to leave one out, see the [Decision Guide](decision-guide.md) and the page each section links to.
+
 ## Quick Lookup
 
 | Attribute | Target | Purpose |
