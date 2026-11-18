@@ -4,8 +4,8 @@
 **Date:** 2026-11-16
 **Related Todo:** [../todo.md](../todo.md)
 **Serves:** AC-4, AC-7
-**Status:** In Progress
-**Last Updated:** 2026-11-16
+**Status:** Done
+**Last Updated:** 2026-11-17
 **Plan-review opt-in:** No (the defect and its cause were located by the PITCH-005 probe)
 **Code-review opt-in:** Yes (generator change on the authorization path)
 **Branch:** `PITCH-009-auth-inheritance` (cut on top of `PITCH-004-narrative-docs` while PR #44 was open)
@@ -118,7 +118,7 @@ Also added: interface-factory and static-factory coverage, and `InheritedAuthEmi
 - Test review round 2, 2026-11-16: APPROVED, no veto-tier finding, no callout.
 - Code review second pass, 2026-11-16: APPROVED, three callouts on AC-4.
   - Callout 1 (operations written through an alias, a constant or a cast were not read on a restated declaration): fixed. Operations are read from the bound attribute value; an unreadable one is error NF0109. Pinned by `RestatedCheck_NonRepresentativeOperationsThrough*_JoinTheUnion` and `Union_BaseDeclarationNamesItsOperationThroughAlias_BothOperationsEnforced_OnceEach`. Logs `reviews/009-impl5-*.log`.
-  - Callout 2 (declarations of one check that disagree on `[Remote]`): put to Keith; see Plan Amendments.
+  - Callout 2 (declarations of one check that disagree on `[Remote]`): Keith ruled 2026-11-17 that the code stands. The combined check is remote if any declaration is; a call site that stops compiling is warning enough. Stated in the release notes.
   - Callout 3 (release notes said "No API change"): release notes corrected; a guarded factory method can become asynchronous.
 
 ---
