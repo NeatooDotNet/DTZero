@@ -103,6 +103,13 @@ services.AddLogging(logging => logging
 
 To read the payloads themselves, switch both tiers to Named and use the browser's network tools.
 
+## When to Leave the Defaults Alone
+
+- **The format.** Stay on Ordinal unless you need to read payloads in a network trace. Named is larger, and both tiers must switch together.
+- **`[Factory]` on a value object.** Leave it off. A record crosses as plain data.
+- **Your own converters and transfer types.** A `[Factory]` type needs neither. The generator writes its reader and writer.
+- **Outside callers.** This wire format is not a contract. It changes whenever the model does. For callers you do not control, see [A Public API Over the Same Model](public-api.md).
+
 ## Next Steps
 
 - [Client-Server Architecture](client-server-architecture.md): how serialization fits in the remote call

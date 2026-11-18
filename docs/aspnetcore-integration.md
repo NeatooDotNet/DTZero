@@ -310,6 +310,13 @@ That round trip has no HTTP, so no middleware runs and there are no status codes
 | `AddDTZeroAspNetCore(options, assemblies)` | The same, with a serialization format the client must match |
 | `UseDTZero()` | Map `POST /api/dtzero`, with correlation, format header and cancellation |
 
+## When to Leave It Out
+
+- **An application with no remote client.** A test, a console tool or any single process registers Logical mode with `AddDTZero` and needs no `DTZero.AspNetCore`. See [Factory Modes](factory-modes.md).
+- **As a public API.** `/api/dtzero` is for the client that ships with the server. Outside callers get endpoints you design: [A Public API Over the Same Model](public-api.md).
+
+It does not take over the application. Controllers and minimal API endpoints of your own run beside it.
+
 ## Next Steps
 
 - [Getting Started](getting-started.md): the first working example

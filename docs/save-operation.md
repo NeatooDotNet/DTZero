@@ -208,6 +208,12 @@ public async Task Save_InsertThenUpdate_WritesTheOneRow()
 <sup><a href='/src/Design/Design.Tests/FactoryTests/SaveTests.cs#L53-L74' title='Snippet source file'>snippet source</a> | <a href='#snippet-save-testing' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
+## When to Leave Save Out
+
+- **A read model or a command.** A type with no writes has no `Save`, and does not implement `IFactorySaveMeta`.
+- **A child.** The client does not save a child. The root's `Save` reaches it, because factory methods call factory methods on the server.
+- **Work that is not "store this object's state".** Approving, cancelling or transferring is a verb. Put it on the object and then call `Save`, as `Order.Submit()` does, or make it an `[Execute]` when it spans more than one aggregate.
+
 ## Next Steps
 
 - [Factory Operations](factory-operations.md#lifecycle-hooks): Insert, Update, Delete and the lifecycle hooks

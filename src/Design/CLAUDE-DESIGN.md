@@ -99,7 +99,7 @@ internal partial class MyChild : IMyChild
     internal void Insert(MyChildRow row) { }  // maps itself into the row its list hands it
 }
 ```
-**Generates**: `public IMyChildFactory` with a public `Create()`; `Fetch()` and `Save(target, row)` are `internal` interface members the server-side cascade calls. A child's `[Create]` is its one public operation (VisionAlignment R-C). For the save and load cascade, in which each object maps its own row, see `Order.cs`, `OrderLine.cs` and `OrderPersistence.cs` (R-D).
+**Generates**: `public IMyChildFactory` with a public `Create()`; `Fetch()` and `Save(target, row)` are `internal` interface members the parent's factory methods call on the server. A child's `[Create]` is its one public operation (VisionAlignment R-C). For loading and saving the aggregate, where factory methods call factory methods and each object maps its own row, see `Order.cs`, `OrderLine.cs` and `OrderPersistence.cs` (R-D).
 
 ### Pattern 2: Interface Factory (a domain service the client calls)
 ```csharp
@@ -591,7 +591,7 @@ internal partial class OrderLine : IOrderLine
 }
 ```
 
-**RIGHT:** `OrderLine.cs` — the root `Fetch(Guid id)` is `[Remote]`; the child `Fetch(OrderLineRow row)`, `Insert` and `Update` are plain `internal`; `Create` is `public` and local (R-C). `OrderLineDualityTests` loads a line as a root from the client and the order cascade still loads and saves it as a child.
+**RIGHT:** `OrderLine.cs` — the root `Fetch(Guid id)` is `[Remote]`; the child `Fetch(OrderLineRow row)`, `Insert` and `Update` are plain `internal`; `Create` is `public` and local (R-C). `OrderLineDualityTests` loads a line as a root from the client and the order still loads and saves it as a child.
 
 **Why it matters:** [Remote] is about *how the method is called*, not *what the type is*. The factory-method signature is the difference (R-G): a key for the root, the parent's row for the child.
 
@@ -1209,8 +1209,8 @@ infrastructure already exists.
 | `Design.Domain/Aggregates/ParamAuthOrder.cs` | Parameterized [AuthorizeFactory<T>] with type-matched and target entity params |
 | `Design.Domain/Aggregates/ParamAuthOrderAuth.cs` | Auth interface and implementation with parameterized methods |
 | `Design.Domain/Aggregates/SecureOrder.cs` | [AspAuthorize] policy-based authorization patterns |
-| `Design.Domain/Entities/OrderLine.cs` | Child entity and child list: public local Create, row-mapped Fetch/Insert/Update, the list's R-D cascade; and the line as a root, a `[Remote, Fetch]` by id (entity duality, R-G) |
-| `Design.Domain/Aggregates/OrderPersistence.cs` | The order's rows and `IOrderDbContext`, the store Order's operations inject; the cascade in outline |
+| `Design.Domain/Entities/OrderLine.cs` | Child entity and child list: public local Create, row-mapped Fetch/Insert/Update, the list's Save, which writes each child (R-D); and the line as a root, a `[Remote, Fetch]` by id (entity duality, R-G) |
+| `Design.Domain/Aggregates/OrderPersistence.cs` | The order's rows and `IOrderDbContext`, the store Order's operations inject; the load and save chain in outline |
 | `Design.Domain/ValueObjects/Money.cs` | Plain-record value objects (`Money`, `Percentage`): no factory, constructors throw (R-F) |
 | `Design.Domain/ValueObjects/TaxRate.cs` | A value object that carries `[Factory]` because its construction needs a server-only service: static `[Remote, Fetch]`, null for an unknown key |
 | `Design.Domain/FactoryPatterns/FactoryEventHandlerPattern.cs` | `[FactoryEventHandler<T>]` class attribute with `static` method — server-side handler running in the caller's DI scope (shared DbContext/transaction), sequential, awaited |

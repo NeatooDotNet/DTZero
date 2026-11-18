@@ -261,6 +261,12 @@ This approach is:
 
 The whole harness is `src/Design/Design.Tests/TestInfrastructure/DesignClientServerContainers.cs`.
 
+## When to Leave [Service] Out
+
+- **A value the caller supplies** is an ordinary parameter. `[Service]` is only for what comes from DI.
+- **A service every instance needs, on both tiers,** goes in the constructor, and both tiers register it.
+- **A server-only service never goes in the constructor** of a type the client also builds. Take it as a `[Service]` parameter of the operation that runs on the server.
+
 ## Next Steps
 
 - [Factory Operations](factory-operations.md): every operation type, and parameter ordering
