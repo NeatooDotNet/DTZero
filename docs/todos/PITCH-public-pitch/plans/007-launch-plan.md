@@ -9,7 +9,7 @@
 **Plan-review opt-in:** No
 **Code-review opt-in:** No (one document)
 **Branch:** `PITCH-007-launch-plan`
-**PR:** —
+**PR:** #49
 
 ---
 

@@ -47,7 +47,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 | 004 | [004-narrative-docs](./plans/004-narrative-docs.md) | Narrative docs carry the why | AC-4, AC-7 | Done | #44 |
 | 005 | [005-authorization](./plans/005-authorization.md) | Authorization and trust | AC-4, AC-7 | Done | #46 |
 | 006 | [006-skill](./plans/006-skill.md) | The skill carries the same reasons | AC-5, AC-7 | Done | #48 |
-| 007 | [007-launch-plan](./plans/007-launch-plan.md) | A plan for generating interest | AC-6 | Done | — |
+| 007 | [007-launch-plan](./plans/007-launch-plan.md) | A plan for generating interest | AC-6 | Done | #49 |
 | 008 | [008-component-docs](./plans/008-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Done | #47 |
 | 009 | [009-auth-inheritance](./plans/009-auth-inheritance.md) | Inherited authorization checks are enforced | AC-4, AC-7 | Done | #45 |
 
