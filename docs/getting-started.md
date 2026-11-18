@@ -108,7 +108,7 @@ builder.Services.AddKeyedScoped(
 <sup><a href='/src/Design/Design.Client.Blazor/Program.cs#L65-L73' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-client-program' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-`DTZeroFactory.Remote` tells DTZero this is the client side: calls to a `[Remote]` operation are serialized and sent to the server through the keyed HttpClient, and everything else runs on the client.
+`DTZeroFactory.Remote` tells DTZero this is the client side: calls to a `[Remote]` operation are serialized and sent to the server through the keyed HttpClient. Any other call runs on the tier that makes it, which here is the client. `[Remote]` marks where a call crosses, not where code lives: the same operation called on the server runs there, and an `internal` operation without `[Remote]` is server-only.
 
 ## Define Your Domain Model
 

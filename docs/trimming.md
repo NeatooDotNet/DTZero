@@ -37,7 +37,7 @@ Not all factory methods get guards. The generator uses the developer's `public` 
 
 - **Static factories** — `[Execute]` obeys `[Remote]`. A `[Remote, Execute]` delegate's local registration is guarded: the trimmer removes the registration lambda, its captured dependencies, and the method body itself. A bare `[Execute]` gets one unguarded local registration and no remote delegate, so its body **ships to the client and runs there** — that is its purpose, and the gate asserts it present. Removal requires the generated forwarding holder described under [Factory Type Preservation](#factory-type-preservation) — without it the registrar attribute names your static class and the trimmer preserves every method on it, bodies included. Both halves — `[Remote]` body absent, bare body present and running — are measured in `DTZero.TrimmingTests`, on the static and the class-level shape.
 - **`[FactoryEventHandler<T>]` classes** — handler registrations are guarded, and the handler bodies plus their `[Service]` dependencies are removed. Same holder mechanism, same reason.
-- **Interface factories** — Local method bodies throw `InvalidOperationException` when `IsServerRuntime` is `false`. Whether that makes the server-only code path unreachable to the trimmer is **not established** for this shape: the guard sits inside the method, which for `async` operations is not sufficient on its own (see *Async `Local*` emission*), and the leg still names `{ImplName}Factory` in its registrar attribute rather than a single-method holder. No leak has been observed, but the leg reaches its implementation through interfaces, so a client-side trimmed test reads "absent" either way and cannot prove elimination. Treat it as unverified rather than guaranteed.
+- **Interface factories** — Local method bodies throw `InvalidOperationException` when `IsServerRuntime` is `false`. The implementation class trims when every reference to it sits behind the `IsServerRuntime` fold, as in a registration method whose first statement returns when the switch is `false`. The generated factory and registrar reference the interface and the generated factory class, never the implementation. Register the implementation in a block both tiers run, and it ships. This was measured in one production application on v1.10.9 by decompiling the linked assembly; Design has no test for it. A byte search for the type name is not evidence either way, because the name is a suffix of its interface's name.
 
 The key insight: the guards are in DTZero's **generated** code, not in your application code. You don't need to modify your domain model at all.
 
@@ -435,6 +435,22 @@ ilspycmd <YourClient>/obj/Release/net10.0/linked/<YourDomain>.dll -t Your.Namesp
 ```
 
 Both properties should be listed with a getter and a setter. A property shown with only a setter has lost its getter, and it is written as nothing.
+
+## What It Costs
+
+Trimming is the part of DTZero that asks the most of you.
+
+- **Configuration.** In one production Blazor WebAssembly application on v1.9.0, the client's trimmer configuration ran to about 200 lines with 63 preserve entries, most of them for serialization.
+- **Faults that appear late.** A development build is not trimmed, so a trimming fault appears only in a published build. That application found one at production cut-over.
+- **A stale publish can ship.** `dotnet clean` does not clear `obj/{Configuration}/{tfm}/webcil/publish/` or `linked/`. Delete `obj` before a release publish.
+
+Some of the gaps that application hit have been closed since. Publish a trimmed build early and exercise it in CI, not at release.
+
+## When to Leave It Out
+
+- **A client that is not published trimmed,** such as a typical desktop application. The switch has nothing to remove there. The server-only method bodies ship in the assembly, and fail if called.
+- **A domain assembly with little that is server-only.** Keep the implementations of server-only services, and the packages they need, in a server project. The less the domain assembly references, the less there is to trim.
+- **Development.** Leave the switch at its default while you build and debug.
 
 ## Limitations
 

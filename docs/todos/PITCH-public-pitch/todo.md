@@ -22,7 +22,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 - [x] **AC-1** · Required — A written verdict names DTZero's audience, its alternatives and its value in AI-assisted development, and the user has ruled on it.
 - [x] **AC-2** · Required — A map ties each DDD concept to a DTZero component or marks it as not DTZero's job, and the user has confirmed it.
 - [x] **AC-3** · Required — The README states the problem, the audience and when not to use DTZero before any code.
-- [ ] **AC-4** · Required — Every docs page says why its component exists and when to leave it out.
+- [x] **AC-4** · Required — Every docs page says why its component exists and when to leave it out.
 - [ ] **AC-5** · Required — The skill carries the same reasons as the docs.
 - [ ] **AC-6** · Required — A launch plan lists where and how to generate interest.
 - [ ] **AC-7** · Required — Every C# sample is still a Design-pinned snippet and both solutions are green.
@@ -48,14 +48,14 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 | 005 | [005-authorization](./plans/005-authorization.md) | Authorization and trust | AC-4, AC-7 | Done | #46 |
 | 006 | [006-skill](./plans/006-skill.md) | The skill carries the same reasons | AC-5, AC-7 | Draft | — |
 | 007 | [007-launch-plan](./plans/007-launch-plan.md) | A plan for generating interest | AC-6 | Draft | — |
-| 008 | [008-component-docs](./plans/008-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Draft | — |
+| 008 | [008-component-docs](./plans/008-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Done | #47 |
 | 009 | [009-auth-inheritance](./plans/009-auth-inheritance.md) | Inherited authorization checks are enforced | AC-4, AC-7 | Done | #45 |
 
 ---
 
 ## Punchlist
 
-- [ ] Replace "cascade" as the name for the save chain in the `collection-factory-basic` source comment and in `docs/factory-operations.md` (four places) · `src/Design/Design.Domain/Entities/OrderLine.cs`, `docs/factory-operations.md` · the word appears only as "what an ORM calls it" · AC-4 (PITCH-005)
+- [x] Replace "cascade" as the name for the save chain in the `collection-factory-basic` source comment and in `docs/factory-operations.md` (four places) · `src/Design/Design.Domain/Entities/OrderLine.cs`, `docs/factory-operations.md` · the word appears only as "what an ORM calls it" · AC-4 (PITCH-005) · source comment in PITCH-005, docs and CLAUDE-DESIGN in PITCH-008; the skill is PITCH-006
 
 - [x] Decide whether the public endpoints carry `RequireAuthorization`, and show an authorized aggregate reached through a public endpoint so "no entry point can miss the rule" has a test · `PublicApi/PublicOrderApi.cs` · decided with the user; if shown, an HTTP test pins it · AC-7 (fits PITCH-005, authorization) · done in PITCH-005: the authorized aggregate is reached through a public endpoint and pinned; `RequireAuthorization` is left to the application and the page says so
 
@@ -79,6 +79,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 - PITCH-001 Step 5 test review — document-only plan with no behavioral bullets (2026-11-13).
 - PITCH-002 Step 5 test review — document-only plan with no behavioral bullets (2026-11-13).
 - PITCH-004 Step 5 test review — document-only plan with no behavioral bullets and no source change (2026-11-15).
+- PITCH-008 Step 5 test review — document-only plan with no behavioral bullets and no source change (2026-11-18).
 - Step 1 fan-out reconnaissance — the user asked for research inside each plan, not up front (2026-11-13).
 
 ---
