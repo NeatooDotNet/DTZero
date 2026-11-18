@@ -9,7 +9,7 @@
 **Plan-review opt-in:** No (the defect and its cause were located by the PITCH-005 probe)
 **Code-review opt-in:** Yes (generator change on the authorization path)
 **Branch:** `PITCH-009-auth-inheritance` (cut on top of `PITCH-004-narrative-docs` while PR #44 was open)
-**PR:** —
+**PR:** #45
 
 ---
 
