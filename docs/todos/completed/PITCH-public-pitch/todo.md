@@ -2,7 +2,7 @@
 
 **ID:** PITCH
 **Type:** Enhancement
-**Status:** In Progress
+**Status:** Complete
 **Created:** 2026-11-13
 **Last Updated:** 2026-11-18
 **Initial split:** 7 plans
@@ -103,6 +103,17 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 
 ## Docs & Retro
 
+**Documentation check.** Each doc change shipped in the plan that changed the behaviour or the argument: the generator fix and its release notes in PITCH-009, the authorization pages and their Design samples in PITCH-005, the skill in PITCH-006. No doc debt is parked. Two statements wait on Keith and are listed in the arc PR: "used in production with WPF" on two pages, and the release date in the v2.0.1 notes, which is right only once 2.0.1 is published.
+
+**Retro.** Nine plans against an initial split of seven and a cap of eleven; both additions came from findings, not from drift (the authorization page split from the component pages, and a probe for a Design sample found the generator dropping inherited authorization checks). Two punchlist rows, both worked; one parked issue; nothing dismissed. Three lessons. First, a sample written to prove a docs claim found a security bug no test had: writing the claim as a pinned sample is worth its cost. Second, the generator fix needed five passes because each review found another way a check could be dropped without a diagnostic; a rule of "enforce it or report it, never drop it" stated in the plan up front would have shortened that. Third, the dropped word "cascade" survived to the close-out audit in a heading because every check searched the whole word; a bulk wording change is checked by its stem. The second and third are already covered by the global rule on verifying a bulk change with a different method; nothing new is routed.
+
 ---
 
 ## Results / Conclusions
+
+- **The verdict:** DTZero is useful to others, for a narrow audience: a .NET client (Blazor WebAssembly or WPF) in front of ASP.NET Core, one team owning both tiers, a domain with behaviour. `verdict.md` holds the evidence and Keith's rulings.
+- **The README, `docs/` and the skill** state the problem, the audience and when not to use DTZero, and each component page says why it exists and when to leave it out. `ddd-map.md` ties each DDD concept to a component.
+- **Version 2.0.1:** authorization checks declared on a base class or an inherited interface are now enforced, and three diagnostics (NF0107 to NF0109) report the cases the generator cannot enforce. Not yet published.
+- **`launch-plan.md`** lists what to make ready, what to write and where to take it. Nothing in it has been carried out.
+- **Close-out audit:** C, then A after fixes (`reviews/close-out-audit.md`).
+- **Not verified by anyone:** that generated output for existing targets is byte-identical after the generator change (the implementer's report only); the new generator tests were never run against the old generator; the last pass of PITCH-009 (NF0109) had no review of its own; the revised skill has not been tried in a fresh session.
