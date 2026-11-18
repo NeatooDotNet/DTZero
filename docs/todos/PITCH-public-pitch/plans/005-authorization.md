@@ -9,7 +9,7 @@
 **Plan-review opt-in:** No
 **Code-review opt-in:** No (Design samples only; the test review covers them)
 **Branch:** `PITCH-005-authorization` (now on top of `PITCH-009-auth-inheritance`, PR #45, itself on PR #44)
-**PR:** —
+**PR:** #46
 
 ---
 
