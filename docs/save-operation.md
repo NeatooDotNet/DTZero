@@ -108,7 +108,7 @@ internal async Task Delete([Service] IOrderDbContext db)
 <sup><a href='/src/Design/Design.Domain/Aggregates/Order.cs#L305-L317' title='Snippet source file'>snippet source</a> | <a href='#snippet-operations-delete' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-### Cascading to Children
+### Saving the Children
 
 One Save on the root writes the whole aggregate, but nothing in the generator walks the graph. The root's Insert and Update call `IOrderLineListFactory.Save(Lines, row.Lines)`, and the list does the rest:
 - it makes a row for each new line;

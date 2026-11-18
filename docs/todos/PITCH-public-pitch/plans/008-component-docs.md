@@ -83,7 +83,7 @@ None: no behavioral bullet.
 ## Plan Amendments
 
 - 2026-11-18: no re-split was needed; the work was one section per page.
-- 2026-11-18: the two reference pages (attributes, interfaces) point to the DDD concepts table and the decision guide instead of repeating why and when-not per entry.
+- 2026-11-18: the attributes reference points to the DDD concepts table and the decision guide instead of repeating why and when-not per entry. The interfaces reference carries one leave-out line of its own and its purpose table.
 - 2026-11-18, #39: the docs entry is done. The skill's trimming table still says "Not established"; PITCH-006 changes it. The issue's note that `dotnet clean` leaves a stale publish is on the page under "What It Costs". The measurement is from a production application, not a Design test, and the page says so.
 - 2026-11-18, #2: `docs/interface-factory.md` documents the feature and predates this todo. Nothing was needed beyond one "leave it out" line.
 - 2026-11-18: "MAUI" removed from the client list in `factory-modes.md`, as PITCH-004 did in getting-started.

@@ -53,10 +53,10 @@ Produce `ddd-map.md` in this todo's folder: each DDD concept, the DTZero compone
 
 ## Acceptance
 
-- [ ] Each DDD concept maps to a component with a reason, or is marked not DTZero's job `[explicit-skip: document]`
-- [ ] Each DTZero component has a stated reason `[explicit-skip: document]`
-- [ ] Every cited Design example exists `[explicit-skip: document]`
-- [ ] The user's confirmation is recorded in the map `[explicit-skip: document]`
+- [x] Each DDD concept maps to a component with a reason, or is marked not DTZero's job `[explicit-skip: document]`
+- [x] Each DTZero component has a stated reason `[explicit-skip: document]`
+- [x] Every cited Design example exists `[explicit-skip: document]`
+- [x] The user's confirmation is recorded in the map `[explicit-skip: document]`
 
 ---
 
