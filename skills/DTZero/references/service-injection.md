@@ -136,7 +136,7 @@ internal void Update(OrderLineRow row)
     MapTo(row);
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L145-L187' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-child' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L146-L188' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-child' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 `[Remote]` marks where the client's call crosses. On a child operation it costs no extra round trip - once on the server, `[Remote]` does nothing different - but it is wrong: it promotes the operation to `public` on the factory interface and gives the client its own way in to the child, around the root that should reach it. A child's `Create` is `public` and local, so the client builds the line and adds it to the order.
@@ -156,12 +156,13 @@ services.AddSingleton<ITaxTable, InMemoryTaxTable>();
 services.AddSingleton<ICustomerPreferencesStore, InMemoryCustomerPreferencesStore>();
 services.AddSingleton<ISupportLog, InMemorySupportLog>();
 services.AddSingleton<ICheckoutLedger, InMemoryCheckoutLedger>();
+services.AddSingleton<ILockableOrderStore, InMemoryLockableOrderStore>();
 services.AddScoped(_ => new TenantTokenService("server-token"));
 services.AddScoped<ITenantTokenService>(sp => sp.GetRequiredService<TenantTokenService>());
 
 services.RegisterMatchingName(typeof(IOrder).Assembly);
 ```
-<sup><a href='/src/Design/Design.Server/ServerServices.cs#L197-L210' title='Snippet source file'>snippet source</a> | <a href='#snippet-aspnetcore-service-registration' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Server/ServerServices.cs#L198-L212' title='Snippet source file'>snippet source</a> | <a href='#snippet-aspnetcore-service-registration' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The client registers only what code running on the client resolves - a bare `[Execute]`'s services, a constructor's services - and nothing server-only:

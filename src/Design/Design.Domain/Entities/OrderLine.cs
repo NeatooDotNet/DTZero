@@ -15,8 +15,8 @@
 //
 // Because Create is public, the generated IOrderLineFactory is a PUBLIC
 // interface whose row Fetch and Save are `internal` interface members. As a
-// child, the client sees Create and nothing else; the server-side cascade calls
-// the rest.
+// child, the client sees Create and nothing else; the order's server-side
+// operations call the rest.
 //
 // [Remote] goes on no child operation. A child's operations run after the
 // root's [Remote] call has already crossed, so [Remote] there marks a crossing
@@ -27,8 +27,9 @@
 // point, so it is [Remote]. The factory-method signature is the difference: the
 // child Fetch takes the row its parent's load hands it, the root Fetch takes a key.
 //
-// THE CASCADE (VisionAlignment R-D): see OrderPersistence.cs. The list hands
-// each line its own row; the line maps itself into it.
+// LOAD AND SAVE (VisionAlignment R-D): factory methods call factory methods;
+// see OrderPersistence.cs. The list hands each line its own row; the line maps
+// itself into it.
 //
 // =============================================================================
 
@@ -135,7 +136,7 @@ internal partial class OrderLine : IOrderLine
     //   signature and stays server-only: the signature is the difference.
     //
     //   A line loaded this way is read-only: its Insert and Update take the row
-    //   the order's cascade hands them, so the line has no save path of its own.
+    //   the order's Save hands them, so the line has no save path of its own.
     //   To change it, fetch its order and save through the root.
     //
     // DID NOT DO THIS: A separate OrderLineDetail class with the same fields
@@ -252,7 +253,7 @@ internal partial class OrderLine : IOrderLine
 /// DESIGN DECISION: The list is never new or deleted
 ///
 /// Its IsNew and IsDeleted are always false, so the generated Save always routes
-/// to Update, which runs the cascade. List-level flags would not cross the wire
+/// to Update, which saves the lines. List-level flags would not cross the wire
 /// anyway, and a Save branch with no operation throws NotImplementedException.
 /// They are read-only for that reason: public settable IsNew/IsDeleted (R-M) are
 /// for objects whose own state crosses the wire, which a collection's does not.
@@ -306,8 +307,8 @@ internal partial class OrderLineList : List<OrderLine>, IOrderLineList
     }
 
     /// <summary>
-    /// The cascade: makes, finds or removes each line's row and hands each live
-    /// line its row through the line factory's Save.
+    /// Saves the lines: makes, finds or removes each line's row and hands each
+    /// live line its row through the line factory's Save.
     /// </summary>
     /// <remarks>
     /// Called by Order.Insert and Order.Update through IOrderLineListFactory.Save,

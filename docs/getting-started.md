@@ -79,12 +79,13 @@ app.UseDTZero();
 
 // A public API for outside callers: hand-written endpoints over the same factories (PublicApi/)
 app.MapPublicOrderApi();
+app.MapPublicAuthorizedOrderApi();
 
 app.MapFallbackToFile("index.html");
 
 await app.RunAsync();
 ```
-<sup><a href='/src/Design/Design.Server/Program.cs#L66-L91' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-server-program' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Server/Program.cs#L66-L92' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-server-program' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 `AddDTZeroAspNetCore()` registers factories, serialization, and server-side handlers. `UseDTZero()` adds the `/api/dtzero` endpoint — the single entry point for all remote factory calls. `UseBlazorFrameworkFiles()` and `MapFallbackToFile()` enable hosted Blazor WASM — the server serves the client application. `UseAuthentication()` and `UseAuthorization()` sign the caller in before the endpoint runs; your application registers its scheme ([Authorization](authorization.md#configure-the-server)).

@@ -106,3 +106,57 @@ public sealed record PublicOrder(int Id, string Customer, string Status, decimal
         order.Total.Amount, order.Total.Currency, order.Lines.Count);
 }
 #endregion
+
+/// <summary>
+/// The public endpoint over AuthorizedOrder, an aggregate with [AuthorizeFactory&lt;T&gt;].
+/// </summary>
+/// <remarks>
+/// DESIGN DECISION: The factory's rules refuse here, as on /api/dtzero
+///
+/// The endpoint takes IAuthorizedOrderFactory, so Fetch runs AuthorizedOrderAuth over
+/// the request's ICurrentUser, as the application's own client's Fetch does. A
+/// refused Fetch returns null, the same as a missing order. To answer a refusal as
+/// 403 rather than 404, the endpoint asks CanFetch first: the same rules Fetch runs,
+/// asked of the factory, not restated here. Fetch still checks them.
+///
+/// DESIGN DECISION: 403 for every refusal, anonymous callers included
+///
+/// The factory says that the caller is refused, not which rule refused, so the
+/// endpoint does not split "not signed in" (401) from "not allowed" (403): that
+/// would restate HasAccess. Results.Problem, not Results.Forbid: Forbid runs the
+/// application's authentication scheme, which Design.Server leaves to the application.
+/// </remarks>
+public static class PublicAuthorizedOrderApi
+{
+    /// <summary>
+    /// Maps GET /api/public/authorized-orders/{id}.
+    /// </summary>
+    #region public-api-authorized
+    public static IEndpointRouteBuilder MapPublicAuthorizedOrderApi(this IEndpointRouteBuilder app)
+    {
+        var orders = app.MapGroup("/api/public/authorized-orders");
+
+        orders.MapGet("/{id}", async (int id, IAuthorizedOrderFactory factory, CancellationToken ct) =>
+        {
+            if (!factory.CanFetch(ct).HasAccess)   // the order's rules, asked of its factory
+                return Results.Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "The caller may not read this order.");
+
+            return await factory.Fetch(id, ct) is { } order
+                ? Results.Ok(PublicAuthorizedOrder.From(order))
+                : Results.NotFound();
+        });
+
+        return app;
+    }
+    #endregion
+}
+
+/// <summary>
+/// An AuthorizedOrder as the public API presents it.
+/// </summary>
+public sealed record PublicAuthorizedOrder(int Id, string Customer, decimal Total)
+{
+    public static PublicAuthorizedOrder From(IAuthorizedOrder order) => new(order.Id, order.CustomerName, order.Total);
+}

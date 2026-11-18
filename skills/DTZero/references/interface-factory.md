@@ -104,12 +104,13 @@ services.AddSingleton<ITaxTable, InMemoryTaxTable>();
 services.AddSingleton<ICustomerPreferencesStore, InMemoryCustomerPreferencesStore>();
 services.AddSingleton<ISupportLog, InMemorySupportLog>();
 services.AddSingleton<ICheckoutLedger, InMemoryCheckoutLedger>();
+services.AddSingleton<ILockableOrderStore, InMemoryLockableOrderStore>();
 services.AddScoped(_ => new TenantTokenService("server-token"));
 services.AddScoped<ITenantTokenService>(sp => sp.GetRequiredService<TenantTokenService>());
 
 services.RegisterMatchingName(typeof(IOrder).Assembly);
 ```
-<sup><a href='/src/Design/Design.Server/ServerServices.cs#L197-L210' title='Snippet source file'>snippet source</a> | <a href='#snippet-aspnetcore-service-registration' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Server/ServerServices.cs#L198-L212' title='Snippet source file'>snippet source</a> | <a href='#snippet-aspnetcore-service-registration' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ## The call

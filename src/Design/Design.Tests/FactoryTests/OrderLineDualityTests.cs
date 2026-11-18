@@ -4,7 +4,7 @@
 //
 // OrderLine is a child of Order and also a root: a line-detail screen loads one
 // line by its id (VisionAlignment R-G). The child operations are unchanged; the
-// order cascade's own tests (AggregateTests) keep loading and saving lines.
+// order's own tests (AggregateTests) keep loading and saving lines.
 //
 // =============================================================================
 
@@ -63,7 +63,7 @@ public class OrderLineDualityTests
 
     /// <summary>
     /// The root Fetch leaves the child path alone: the order still loads the line
-    /// through its row and saves a change to it through the cascade.
+    /// through its row and saves a change to it through the order's Save.
     /// </summary>
     [Fact]
     public async Task OrderLine_StaysAChild_OfItsOrder()

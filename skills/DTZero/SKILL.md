@@ -236,7 +236,7 @@ internal async Task<bool> Fetch(Guid id, [Service] IOrderDbContext db)
     return true;
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L144-L204' title='Snippet source file'>snippet source</a> | <a href='#snippet-skill-orderline-root-and-child' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L145-L205' title='Snippet source file'>snippet source</a> | <a href='#snippet-skill-orderline-root-and-child' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### `[Execute]` obeys `[Remote]`

@@ -96,17 +96,49 @@ app.UseDTZero();
 
 // A public API for outside callers: hand-written endpoints over the same factories (PublicApi/)
 app.MapPublicOrderApi();
+app.MapPublicAuthorizedOrderApi();
 
 app.MapFallbackToFile("index.html");
 
 await app.RunAsync();
 ```
-<sup><a href='/src/Design/Design.Server/Program.cs#L66-L91' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-server-program' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Server/Program.cs#L66-L92' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-server-program' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
+
+## Authorization comes with the factory
+
+An aggregate's authorization rules are on its factory, so a public endpoint that uses the factory is under them. The endpoint does not restate who may read an order:
+
+<!-- snippet: public-api-authorized -->
+<a id='snippet-public-api-authorized'></a>
+```cs
+public static IEndpointRouteBuilder MapPublicAuthorizedOrderApi(this IEndpointRouteBuilder app)
+{
+    var orders = app.MapGroup("/api/public/authorized-orders");
+
+    orders.MapGet("/{id}", async (int id, IAuthorizedOrderFactory factory, CancellationToken ct) =>
+    {
+        if (!factory.CanFetch(ct).HasAccess)   // the order's rules, asked of its factory
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "The caller may not read this order.");
+
+        return await factory.Fetch(id, ct) is { } order
+            ? Results.Ok(PublicAuthorizedOrder.From(order))
+            : Results.NotFound();
+    });
+
+    return app;
+}
+```
+<sup><a href='/src/Design/Design.Server/PublicApi/PublicOrderApi.cs#L134-L153' title='Snippet source file'>snippet source</a> | <a href='#snippet-public-api-authorized' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+To server code a refused `Fetch` returns `null`, the same as "not found". The endpoint asks `CanFetch` first so that it can answer 403. [Authorization](authorization.md) covers the rules themselves.
 
 ## Things to know
 
-- **Authentication, rate limiting and versioning are the application's.** The sample adds none. Apply them to the public endpoints as you would to any ASP.NET Core API.
+- **Authentication, rate limiting and versioning are the application's.** The sample adds none. Apply them to the public endpoints as you would to any ASP.NET Core API. The factory's rules read the caller that authentication established.
 - **Route constraints and the WebAssembly fallback.** In a server that hosts a Blazor WebAssembly client, a request that matches no endpoint is answered with `index.html`. A route such as `/{id:int}` does not match a non-numeric id, so that request gets the page and a 200. The sample leaves the constraint off; a bad id then reaches the endpoint and gets a 400.
 - **Read models work the same way.** A list or summary type with a `[Fetch]` can back a public query endpoint through its factory.
 
