@@ -4,7 +4,7 @@
 **Date:** 2026-11-15
 **Related Todo:** [../todo.md](../todo.md)
 **Serves:** AC-4, AC-7
-**Status:** In Progress
+**Status:** Done
 **Last Updated:** 2026-11-17
 **Plan-review opt-in:** No
 **Code-review opt-in:** No (Design samples only; the test review covers them)
@@ -92,6 +92,8 @@ Also added: `SalesManager_PassesEveryCheck`, `OnlyTheNamedAuthClass_IsRegistered
 ---
 
 ## Gate Record
+
+- Test review round 1, 2026-11-17, `reviews/005-test-review.md`: APPROVED, no veto-tier finding, no callout. Every C# block on the two pages is an embedded snippet, and the new prose matches the tests. Not triaged (theoretical): the endpoint's not-found branch is unreachable for this sample; two `Quote` claims follow from the Write flag without a `Quote` test of their own; the advice to take a protected field from the stored row has no sample.
 
 ---
 
