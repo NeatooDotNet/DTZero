@@ -56,3 +56,19 @@ No occurrence in the arc's diff, commit messages or paths, by a case-insensitive
 - R3: the README sentence now says the server runs a type's authorization rules before it runs the operation.
 - R4 and the WPF claim: put to Keith in the arc PR.
 - Container misses: fixed. The company-link ruling is recorded in the Discovery Log.
+
+## 2026-11-18, re-audit at `861dcba`: grade A
+
+- V1 closed: a case-insensitive search for the stem "cascad" finds only the two allowed uses; the same search finds 76 hits on `main`, so it can fire.
+- AC-5 holds: the skill's table and its trimming cost carry the docs' per-component reasons, some of them elsewhere in the skill. The skill links to nothing outside its directory.
+- R1, R2, R3 closed. The five container misses fixed.
+- No veto-tier finding. The dated v2.0.1 notes follow the release order the project's instructions prescribe (notes, version, tag). The WPF claim breaks no rule but is unverified.
+
+Callouts, both fixed after the re-audit:
+
+- **C1 (AC-5).** The skill lacked two reasons from the authorization page: a type reached only from server code needs no authorization of its own, and authorization is not a substitute for the object's own verdict. Two rows added to the skill's table.
+- **C2 (AC-4).** The todo's Discovery Log said all four callouts were fixed; R4 was put to Keith. Reworded.
+
+Could not verify: the arc-to-main PR body, which did not exist yet; that each of the roughly 87 older regions is pinned by a Design test.
+
+The auditor noted it would read AC-5 as partly met, and so grade C, under a strict reading of "the same reasons"; the two missing reasons are the ones C1 names.

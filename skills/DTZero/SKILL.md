@@ -388,10 +388,12 @@ Each piece exists to remove something you would otherwise write. Where there is 
 | `[Service]` | The caller supplies the value. Or every instance needs the service on both tiers; then it is a constructor parameter |
 | An interface factory | Only the server uses the service. That is a plain interface taken as a `[Service]` parameter |
 | A factory event | The change is the aggregate's own, the step is one the operation cannot succeed without, or only the caller needs the answer. Not for delivery that must survive a failure: handlers run in process |
+| Any authorization on a type | The type is only reached from server code that has already checked, such as a child loaded by its root. The root's factory is the entry point |
 | `[AuthorizeFactory<T>]` | The rule is only "an authenticated request with this role" and the screen never asks. `[AspAuthorize]` says that |
 | `[AspAuthorize]` | The screen must ask before it acts, the rule depends on the record, or the type is used with no HTTP request |
 | A shared auth base | Types have no rule in common. A base with one user is an extra file |
 | A rule that reads the stored record | The state is one the user may change themselves. It costs a read on every save |
+| Authorization, as a way to say "not yet" | The object is in a state the user can change, such as a draft with no lines. That is a verdict the object reports through a property the screen reads (`Order.CanSubmit`), not a refusal |
 | The Named serialization format | You do not need to read payloads in a network trace. Both tiers must switch together |
 | Logical mode | The client has a server: a `[Remote]` operation would run in the client. Also as the only test of something that crosses, because it serializes nothing |
 | IL trimming | The client is not published trimmed, or the domain assembly holds little that is server-only. It has a real cost: [trimming.md](references/trimming.md#what-it-costs) |

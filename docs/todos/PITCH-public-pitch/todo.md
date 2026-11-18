@@ -70,9 +70,9 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 ## Discovery Log
 
 - 2026-11-15 · Re-split · AC-4 · PITCH-005 became two plans: 005 (authorization and trust, with Design samples) and 008 (the remaining component pages, prose). The authorization work needs code and a test review; the rest does not. Eight plans of a cap of eleven.
-- 2026-11-16 · Scope · AC-4 · The PITCH-005 probe found that the generator drops an authorization check an auth interface inherits, with no diagnostic, and cannot resolve one declared on an abstract base class. Keith ruled: fix the generator in this todo (PITCH-009), ahead of the authorization page. Out of Scope amended. Nine plans of a cap of eleven.
 - 2026-11-15 · Ruling · AC-3 · Keith allowed the README to state the production application's counts and to link the company site, in chat: "you can even point to our company site". This widens PITCH-001's counts-only constraint for that one link.
-- 2026-11-18 · Audit · AC-4, AC-5 · The close-out audit graded C on two items and listed four callouts. All were fixed on `PITCH-closeout`: see Close-Out Audit.
+- 2026-11-16 · Scope · AC-4 · The PITCH-005 probe found that the generator drops an authorization check an auth interface inherits, with no diagnostic, and cannot resolve one declared on an abstract base class. Keith ruled: fix the generator in this todo (PITCH-009), ahead of the authorization page. Out of Scope amended. Nine plans of a cap of eleven.
+- 2026-11-18 · Audit · AC-4, AC-5 · The close-out audit graded C on two items and listed four callouts. Both items and three callouts were fixed on `PITCH-closeout`; the fourth, publishing 2.0.1, is put to Keith. See Close-Out Audit.
 
 ---
 
@@ -97,6 +97,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 - 2026-11-18, `reviews/close-out-audit.md`: grade C. Veto-tier: `docs/save-operation.md` still headed the save chain "Cascading to Children"; every earlier check searched for "cascade", which does not occur in "Cascading". AC-5 partly met: the skill lacked the per-component leave-outs and the trimming cost.
 - Fixed on `PITCH-closeout`: the heading; a "When to leave a piece out" table in `SKILL.md` and "What it costs" in the skill's trimming reference; the CSLA sentence in the README and `the-problem` no longer claims compile-time generation as a difference (R1); the release-notes index matches the v2.0.1 page (R2); the README no longer says authorization runs on the server for every call (R3).
 - Left for Keith (R4 and two unverified claims): publishing 2.0.1, whose notes carry a date and a NuGet link; "used in production with WPF"; both are in the arc PR body.
+- 2026-11-18, re-audit: grade A at `861dcba`. Two callouts, both then fixed: the skill lacked two authorization leave-outs (a type reached only from server code; authorization is not a verdict), and a Discovery Log line overstated what was fixed.
 
 ---
 
