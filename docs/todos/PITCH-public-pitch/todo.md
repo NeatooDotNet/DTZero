@@ -44,7 +44,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 | 001 | [001-verdict](./plans/001-verdict.md) | The verdict: is DTZero useful to others | AC-1 | Done | #41 |
 | 002 | [002-ddd-map](./plans/002-ddd-map.md) | Map DDD concepts to DTZero components | AC-2 | Done | #42 |
 | 003 | [003-readme](./plans/003-readme.md) | Rewrite the README around the case | AC-3, AC-7 | Done | #43 |
-| 004 | [004-narrative-docs](./plans/004-narrative-docs.md) | Narrative docs carry the why | AC-4, AC-7 | Draft | — |
+| 004 | [004-narrative-docs](./plans/004-narrative-docs.md) | Narrative docs carry the why | AC-4, AC-7 | Done | #44 |
 | 005 | [005-component-docs](./plans/005-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Draft | — |
 | 006 | [006-skill](./plans/006-skill.md) | The skill carries the same reasons | AC-5, AC-7 | Draft | — |
 | 007 | [007-launch-plan](./plans/007-launch-plan.md) | A plan for generating interest | AC-6 | Draft | — |
@@ -52,6 +52,8 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 ---
 
 ## Punchlist
+
+- [ ] Replace "cascade" as the name for the save chain in the `collection-factory-basic` source comment and in `docs/factory-operations.md` (four places) · `src/Design/Design.Domain/Entities/OrderLine.cs`, `docs/factory-operations.md` · the word appears only as "what an ORM calls it" · AC-4 (PITCH-005)
 
 - [ ] Decide whether the public endpoints carry `RequireAuthorization`, and show an authorized aggregate reached through a public endpoint so "no entry point can miss the rule" has a test · `PublicApi/PublicOrderApi.cs` · decided with the user; if shown, an HTTP test pins it · AC-7 (fits PITCH-005, authorization)
 
@@ -71,6 +73,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 
 - PITCH-001 Step 5 test review — document-only plan with no behavioral bullets (2026-11-13).
 - PITCH-002 Step 5 test review — document-only plan with no behavioral bullets (2026-11-13).
+- PITCH-004 Step 5 test review — document-only plan with no behavioral bullets and no source change (2026-11-15).
 - Step 1 fan-out reconnaissance — the user asked for research inside each plan, not up front (2026-11-13).
 
 ---
