@@ -57,7 +57,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 
 - [ ] Replace "cascade" as the name for the save chain in the `collection-factory-basic` source comment and in `docs/factory-operations.md` (four places) · `src/Design/Design.Domain/Entities/OrderLine.cs`, `docs/factory-operations.md` · the word appears only as "what an ORM calls it" · AC-4 (PITCH-005)
 
-- [ ] Decide whether the public endpoints carry `RequireAuthorization`, and show an authorized aggregate reached through a public endpoint so "no entry point can miss the rule" has a test · `PublicApi/PublicOrderApi.cs` · decided with the user; if shown, an HTTP test pins it · AC-7 (fits PITCH-005, authorization)
+- [x] Decide whether the public endpoints carry `RequireAuthorization`, and show an authorized aggregate reached through a public endpoint so "no entry point can miss the rule" has a test · `PublicApi/PublicOrderApi.cs` · decided with the user; if shown, an HTTP test pins it · AC-7 (fits PITCH-005, authorization) · done in PITCH-005: the authorized aggregate is reached through a public endpoint and pinned; `RequireAuthorization` is left to the application and the page says so
 
 ## Dismissed
 

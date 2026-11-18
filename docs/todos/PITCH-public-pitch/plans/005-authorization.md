@@ -5,7 +5,7 @@
 **Related Todo:** [../todo.md](../todo.md)
 **Serves:** AC-4, AC-7
 **Status:** In Progress
-**Last Updated:** 2026-11-15
+**Last Updated:** 2026-11-17
 **Plan-review opt-in:** No
 **Code-review opt-in:** No (Design samples only; the test review covers them)
 **Branch:** `PITCH-005-authorization` (now on top of `PITCH-009-auth-inheritance`, PR #45, itself on PR #44)
@@ -56,11 +56,11 @@ Make the authorization page carry the verdict's fifth ruling: authorization is a
 
 ## Acceptance
 
-- [ ] A broad check declared once on a shared base refuses an operation on a type whose own auth class does not restate it `[integration]`
-- [ ] A caller refused by an aggregate's authorization is refused through a public endpoint that uses the same factory `[integration]`
-- [ ] A write is refused from the stored record's state even when the object the client sends claims otherwise `[integration]`
-- [ ] `docs/authorization.md` opens with why authorization lives on the factory, shows the base, has a trust section, and says when to leave each approach out `[explicit-skip: document]`
-- [ ] Both solutions build and test green `[explicit-skip: covered by the gate logs]`
+- [x] A broad check declared once on a shared base refuses an operation on a type whose own auth class does not restate it `[integration]`
+- [x] A caller refused by an aggregate's authorization is refused through a public endpoint that uses the same factory `[integration]`
+- [x] A write is refused from the stored record's state even when the object the client sends claims otherwise `[integration]`
+- [x] `docs/authorization.md` opens with why authorization lives on the factory, shows the base, has a trust section, and says when to leave each approach out `[explicit-skip: document]`
+- [x] Both solutions build and test green `[explicit-skip: covered by the gate logs]`
 
 ---
 
@@ -79,6 +79,16 @@ Make the authorization page carry the verdict's fifth ruling: authorization is a
 
 ## Test Evidence
 
+Logs: `reviews/005-impl2-build.log` and `reviews/005-impl2-test.log` (both solutions, after Step 1), then `reviews/005-impl3-*.log` (Design only, after a formatting change to one region). Design.Tests 187 to 200 per framework, 1 skipped; UnitTests 901 and IntegrationTests 691 (5 skipped) as PITCH-009 left them. All tests are in `src/Design/Design.Tests`, on the real client/server containers or the real server host.
+
+| Acceptance bullet | Test | Tier |
+|---|---|---|
+| Broad check on a shared base refuses, not restated | `SignedOut_IsRefusedFetch_ByTheInheritedReadCheck`, `ReadOnlyCaller_CanFetch_ButIsRefusedSave_ByTheInheritedWriteCheck`, `NonManager_SavesAnEdit_ButIsRefusedDelete_ByTheDerivedClassCheck` (`FactoryTests/AuthorizationBaseTests.cs`) | integration, confirmed |
+| Refused through a public endpoint that uses the same factory | `Get_CallerTheRulesRefuse_Is403_LikeTheApplicationsFetch`, `Get_AnonymousCaller_Is403` (`Http/PublicAuthorizedOrderApiHttpTests.cs`) | integration, confirmed |
+| Write refused from the stored record when the sent object claims otherwise | `LockedInStore_SentAsActive_SaveIsRefused_AndTheStoredRowIsUnchanged`, `LockedInStore_SentAsNew_SaveIsRefused_AndTheStoredRowIsUnchanged` (`FactoryTests/StoredRecordAuthorizationTests.cs`) | integration, confirmed |
+
+Also added: `SalesManager_PassesEveryCheck`, `OnlyTheNamedAuthClass_IsRegistered`, `Get_CallerTheRulesAllow_GetsTheContract`, `ActiveInStore_SaveIsAllowed_AndTheStoredRowChanges`, `CanSaveTarget_AnswersFromTheStoredRow`, and `ParamAuth_Save_DecidesFromTheStatusTheClientSends`, which pins the contrast the trust section describes.
+
 ---
 
 ## Gate Record
@@ -86,6 +96,9 @@ Make the authorization page carry the verdict's fifth ruling: authorization is a
 ---
 
 ## Plan Amendments
+
+- 2026-11-17, Step 1: the base is an abstract class, `AuthorizationBase`, and `Quote` names the derived class `QuoteAuth` in `[AuthorizeFactory<T>]`, where the other Design samples name an interface. An interface cannot inherit from a class. The base uses `OrderRoles` for its role names; no role constant was added.
+- 2026-11-17, Step 5: one line in region `public-api-authorized` was over the snippet width limit and was wrapped (formatting only). `docs/public-api.md` gained a section on authorization. Embeds of the server setup and service registration regions in other pages gained lines, as expected.
 
 - 2026-11-17, Step 1 unblocked. Keith ruled on 2026-11-16 to fix the generator; PITCH-009 (PR #45) did, and this branch is rebased onto it. The two Parked rows are removed: PITCH-009 did that work. The page also documents NF0107, NF0108 and NF0109, and the rule that a restated check combines operations.
 

@@ -139,7 +139,9 @@ public static class PublicAuthorizedOrderApi
         orders.MapGet("/{id}", async (int id, IAuthorizedOrderFactory factory, CancellationToken ct) =>
         {
             if (!factory.CanFetch(ct).HasAccess)   // the order's rules, asked of its factory
-                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "The caller may not read this order.");
+                return Results.Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "The caller may not read this order.");
 
             return await factory.Fetch(id, ct) is { } order
                 ? Results.Ok(PublicAuthorizedOrder.From(order))

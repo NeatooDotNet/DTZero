@@ -273,12 +273,13 @@ app.UseDTZero();
 
 // A public API for outside callers: hand-written endpoints over the same factories (PublicApi/)
 app.MapPublicOrderApi();
+app.MapPublicAuthorizedOrderApi();
 
 app.MapFallbackToFile("index.html");
 
 await app.RunAsync();
 ```
-<sup><a href='/src/Design/Design.Server/Program.cs#L66-L91' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-server-program' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Server/Program.cs#L66-L92' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-server-program' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 **Client (Blazor WebAssembly):**
