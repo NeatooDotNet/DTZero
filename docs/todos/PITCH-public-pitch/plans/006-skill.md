@@ -9,7 +9,7 @@
 **Plan-review opt-in:** No
 **Code-review opt-in:** No (prose and embeds of existing regions)
 **Branch:** `PITCH-006-skill`
-**PR:** —
+**PR:** #48
 
 ---
 
