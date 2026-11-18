@@ -163,7 +163,7 @@ public sealed record PublicOrder(int Id, string Customer, string Status, decimal
 
 The usual outcome otherwise is an application that can do everything, a public API that can do a few things, and the rules for those few things written twice.
 
-Whatever arrives from a client is input. Authorization runs on the server for every call, and the server's own methods decide what is stored.
+Whatever arrives from a client is input. The server runs a type's authorization rules before it runs the operation, and the server's own methods decide what is stored.
 
 ## Authorization
 
@@ -213,7 +213,7 @@ It works with any class: an aggregate, a read model, a static command, a record.
 
 ## Where it comes from
 
-The idea is not new. [CSLA .NET](https://cslanet.com) has moved business objects between tiers for over twenty years, and DTZero owes it the idea. The difference is that DTZero asks for no base class and works with any type, and everything it needs is generated at compile time.
+The idea is not new. [CSLA .NET](https://cslanet.com) has moved business objects between tiers for over twenty years, and DTZero owes it the idea. The difference is that DTZero asks for no base class and works with any type.
 
 It is used in production. An application from [revmedsystems.com](https://revmedsystems.com) is built on it: 74 factory types and 233 factory operations, with 3 hand-written controllers in the whole application (sign-in, PDFs and images).
 

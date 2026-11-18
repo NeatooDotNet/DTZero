@@ -4,7 +4,7 @@
 **Type:** Enhancement
 **Status:** In Progress
 **Created:** 2026-11-13
-**Last Updated:** 2026-11-13
+**Last Updated:** 2026-11-18
 **Initial split:** 7 plans
 **Plan cap:** 11
 **Arc branch:** `PITCH`
@@ -25,7 +25,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 - [x] **AC-4** · Required — Every docs page says why its component exists and when to leave it out.
 - [x] **AC-5** · Required — The skill carries the same reasons as the docs.
 - [x] **AC-6** · Required — A launch plan lists where and how to generate interest.
-- [ ] **AC-7** · Required — Every C# sample is still a Design-pinned snippet and both solutions are green.
+- [x] **AC-7** · Required — Every C# sample is still a Design-pinned snippet and both solutions are green.
 - [x] **AC-8** · Optional — Documentation issues #2, #37 and #39 are closed along the way. Closed 2026-11-18 with Keith's approval.
 
 ## Out of Scope
@@ -69,8 +69,10 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 
 ## Discovery Log
 
-- 2026-11-15 · Re-split · PITCH-005 became two plans: 005 (authorization and trust, with Design samples) and 008 (the remaining component pages, prose). The authorization work needs code and a test review; the rest does not. Eight plans of a cap of eleven.
-- 2026-11-16 · Scope · The PITCH-005 probe found that the generator drops an authorization check an auth interface inherits, with no diagnostic, and cannot resolve one declared on an abstract base class. Keith ruled: fix the generator in this todo (PITCH-009), ahead of the authorization page. Out of Scope amended. Nine plans of a cap of eleven.
+- 2026-11-15 · Re-split · AC-4 · PITCH-005 became two plans: 005 (authorization and trust, with Design samples) and 008 (the remaining component pages, prose). The authorization work needs code and a test review; the rest does not. Eight plans of a cap of eleven.
+- 2026-11-16 · Scope · AC-4 · The PITCH-005 probe found that the generator drops an authorization check an auth interface inherits, with no diagnostic, and cannot resolve one declared on an abstract base class. Keith ruled: fix the generator in this todo (PITCH-009), ahead of the authorization page. Out of Scope amended. Nine plans of a cap of eleven.
+- 2026-11-15 · Ruling · AC-3 · Keith allowed the README to state the production application's counts and to link the company site, in chat: "you can even point to our company site". This widens PITCH-001's counts-only constraint for that one link.
+- 2026-11-18 · Audit · AC-4, AC-5 · The close-out audit graded C on two items and listed four callouts. All were fixed on `PITCH-closeout`: see Close-Out Audit.
 
 ---
 
@@ -91,6 +93,10 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 ---
 
 ## Close-Out Audit
+
+- 2026-11-18, `reviews/close-out-audit.md`: grade C. Veto-tier: `docs/save-operation.md` still headed the save chain "Cascading to Children"; every earlier check searched for "cascade", which does not occur in "Cascading". AC-5 partly met: the skill lacked the per-component leave-outs and the trimming cost.
+- Fixed on `PITCH-closeout`: the heading; a "When to leave a piece out" table in `SKILL.md` and "What it costs" in the skill's trimming reference; the CSLA sentence in the README and `the-problem` no longer claims compile-time generation as a difference (R1); the release-notes index matches the v2.0.1 page (R2); the README no longer says authorization runs on the server for every call (R3).
+- Left for Keith (R4 and two unverified claims): publishing 2.0.1, whose notes carry a date and a NuGet link; "used in production with WPF"; both are in the arc PR body.
 
 ---
 

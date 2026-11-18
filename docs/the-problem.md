@@ -105,7 +105,7 @@ It works with any class: an aggregate, a read model, a static command, a record.
 
 ## Coming from CSLA?
 
-DTZero owes the idea to [CSLA .NET](https://cslanet.com), which has moved business objects between tiers for over twenty years. The operations will look familiar. The difference is that DTZero asks for no base class and works with any type, with the factories and serialization generated at compile time.
+DTZero owes the idea to [CSLA .NET](https://cslanet.com), which has moved business objects between tiers for over twenty years. The operations will look familiar. The difference is that DTZero asks for no base class and works with any type.
 
 ## Working with an AI assistant
 

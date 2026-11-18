@@ -31,6 +31,16 @@ By shape, measured against a publish-trimmed assembly in DTZero's trimming gate:
 
 The registrar attribute that keeps factory registration alive under trimming preserves every method on the type it names, so the generator points it at a single-method forwarding holder rather than at the class or the factory. A guarded `async` operation is emitted as a non-async wrapper that carries the guard and forwards to a private async core, because the trimmer does not remove a guard's dead branch from inside an `async` state machine. The guard therefore throws synchronously from the factory entry point, not as a faulted `Task`.
 
+## What it costs
+
+Trimming is the part of DTZero that asks the most of an application. Say so when recommending it.
+
+- **Configuration.** In one production Blazor WebAssembly application on v1.9.0, the client's trimmer configuration ran to about 200 lines with 63 preserve entries, most of them for serialization.
+- **Faults that appear late.** A development build is not trimmed, so a trimming fault appears only in a published build. Publish a trimmed build early and exercise it in CI.
+- **A stale publish can ship.** `dotnet clean` does not clear `obj/{Configuration}/{tfm}/webcil/publish/` or `linked/`. Delete `obj` before a release publish.
+
+Leave it out for a client that is not published trimmed, such as a typical desktop application, and keep the switch at its default while developing. The less the domain assembly holds that is server-only, the less there is to trim: keep the implementations of server-only services, and their packages, in a server project.
+
 ## Prerequisite: a direct package reference
 
 Source generators run only where their package is referenced directly. Every project that declares `[Factory]`, `[FactoryEventHandler<T>]` or `[AuthorizeFactory<T>]` types needs its own `PackageReference` to `DTZero`. A transitive reference - through a `ProjectReference` to the domain project, or a package reference with `PrivateAssets="all"` - silently skips generation: no registrar, no preservation calls.
