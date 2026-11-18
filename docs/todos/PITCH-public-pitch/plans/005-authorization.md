@@ -8,7 +8,7 @@
 **Last Updated:** 2026-11-15
 **Plan-review opt-in:** No
 **Code-review opt-in:** No (Design samples only; the test review covers them)
-**Branch:** `PITCH-005-authorization` (cut on top of `PITCH-004-narrative-docs` while PR #44 was open)
+**Branch:** `PITCH-005-authorization` (now on top of `PITCH-009-auth-inheritance`, PR #45, itself on PR #44)
 **PR:** —
 
 ---
@@ -86,6 +86,8 @@ Make the authorization page carry the verdict's fifth ruling: authorization is a
 ---
 
 ## Plan Amendments
+
+- 2026-11-17, Step 1 unblocked. Keith ruled on 2026-11-16 to fix the generator; PITCH-009 (PR #45) did, and this branch is rebased onto it. The two Parked rows are removed: PITCH-009 did that work. The page also documents NF0107, NF0108 and NF0109, and the rule that a restated check combines operations.
 
 - 2026-11-15, Step 1 stopped. Probes showed the generator does not support a shared base as the step assumed. (A) A base interface: the inherited check is dropped silently. (B) An abstract base class: the server fails at startup. (C) One interface restating the broad check, with an abstract class implementing it: works, but restates. (D) A concrete base class used as its own auth type: works, as a separate service. No sample was written. Awaiting the user's ruling; both defects are on the todo's Parked list as proposed.
 - 2026-11-15, Step 2: a refused Fetch returns null to server code, the same as not found. The endpoint asks `CanFetch` first and answers 403; `Results.Forbid` is not used because Design.Server registers no scheme. `app.MapPublicAuthorizedOrderApi()` is inside the embedded server setup region.
