@@ -137,7 +137,7 @@ order = (await orderFactory.Save(order))!;      // IsDeleted: Delete
 
 On a factory with `[AuthorizeFactory<T>]`, a new-and-deleted object and a `bool` write that returns `false` both surface as `NotAuthorizedException` today ([#11](https://github.com/NeatooDotNet/DTZero/issues/11)).
 
-## The list cascade
+## The list saves each child
 
 The root's `Insert` and `Update` above make the order's row and hand its line rows to the list factory's `Save`. The list loops: it makes a row for each new line, finds the row of each existing one, removes the row of each removed one, and hands each line its row. Each line maps itself into the row it is handed (`OrderLine` in [SKILL.md](../SKILL.md#one-class-a-child-and-a-root)). The root flushes once.
 

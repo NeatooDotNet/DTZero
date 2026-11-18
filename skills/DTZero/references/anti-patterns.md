@@ -50,7 +50,7 @@ foreach (var line in Lines)
     row.Lines.Add(new OrderLineRow { ProductName = line.ProductName, Quantity = line.Quantity });
 ```
 
-**Fix:** the root hands the row's child collection to the list factory's `Save`; the list hands each child its row, and the child maps itself ([class-factory.md](class-factory.md#the-list-cascade)).
+**Fix:** the root hands the row's child collection to the list factory's `Save`; the list hands each child its row, and the child maps itself ([class-factory.md](class-factory.md#the-list-saves-each-child)).
 
 ## 5. `[Remote]` on a child's operation
 
