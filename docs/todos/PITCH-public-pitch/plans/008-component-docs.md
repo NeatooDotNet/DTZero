@@ -9,7 +9,7 @@
 **Plan-review opt-in:** No
 **Code-review opt-in:** No (prose only)
 **Branch:** `PITCH-008-component-docs`
-**PR:** —
+**PR:** #47
 
 ---
 
