@@ -71,6 +71,63 @@ internal static class DiagnosticDescriptors
         description: "A [Factory]-attributed interface declares a remote contract; every method is implicitly a remote call. Placing [Create], [Fetch], [Insert], [Update], [Delete], or [Execute] on an interface method causes duplicate generation and compile errors in downstream code. Remove the attribute from the interface method. Scoped authorization on interface factories uses [AuthorizeFactory(Execute)] / [AuthorizeFactory(Read)] on auth-class methods with parameter matching — see AuthorizedRepository.cs.");
 
     /// <summary>
+    /// NF0107: An authorization check in the auth type's hierarchy has no declaration in this
+    /// compilation's source, so no check can be generated for it.
+    /// </summary>
+    /// <remarks>
+    /// The generator builds a check from the method's source declaration. A check declared in a
+    /// referenced assembly — on a base class, a base interface, or the auth type itself — has none,
+    /// and used to be dropped with only a debug message, leaving the operation unchecked. Error,
+    /// because the factory would otherwise run an operation the auth type means to guard.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor AuthCheckDeclarationNotInSource = new(
+        id: "NF0107",
+        title: "Authorization check cannot be generated: declaration is not in source",
+        messageFormat: "Authorization check '{2}' declared on '{1}' cannot be generated for auth type '{0}': its declaration is not in this compilation's source. Declare the check on '{0}' (or another type in this project) so it can be enforced.",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "[AuthorizeFactory] checks are generated from their source declarations. A check the auth type inherits from a base class or base interface in a referenced assembly, or declared on an auth type that is itself in a referenced assembly, cannot be generated, and the operation would run without it. Restate the check in this project: a virtual or abstract base method can be overridden with [AuthorizeFactory] on the override, and an interface check can be redeclared on the auth interface.");
+
+    /// <summary>
+    /// NF0108: An authorization check cannot be called through the auth type, because the auth class
+    /// implements it explicitly (or not at all, leaving a default interface implementation).
+    /// </summary>
+    /// <remarks>
+    /// The generated factory resolves the auth type and calls each check on it. A check the class
+    /// implements explicitly is not a member of the class, so that call does not compile; it used to
+    /// be emitted anyway and fail with an unrelated-looking CS1061 inside generated code. No call is
+    /// generated for it now. Error, because the operation would otherwise run without the check.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor AuthCheckNotCallableOnAuthType = new(
+        id: "NF0108",
+        title: "Authorization check is not callable on the auth type",
+        messageFormat: "Authorization check '{1}' cannot be called through auth type '{0}': '{0}' implements it explicitly, or not at all. An authorization check must be callable on the auth type; implement '{1}' implicitly as a public method of '{0}', or name the interface in [AuthorizeFactory<T>].",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The generated factory calls each [AuthorizeFactory] check on the auth type named by [AuthorizeFactory<T>]. When T is a class that implements the check's interface method explicitly (or carries [AuthorizeFactory] on the explicit implementation itself), or leaves it to a default interface implementation, the check is not a member of T and cannot be called through it. Implement the method implicitly as a public method of T, or name the interface as the auth type.");
+
+    /// <summary>
+    /// NF0109: The operations an in-source <c>[AuthorizeFactory(...)]</c> declaration names could
+    /// not be read from its bound attribute constant.
+    /// </summary>
+    /// <remarks>
+    /// Operations are read from the bound constant, so a <c>using</c> alias, a <c>const</c> or a cast
+    /// reads like <c>AuthorizeFactoryOperation.X</c>. When even that cannot be read (an argument that
+    /// does not bind to a constant), the check's operations are unknown: no check is generated from the
+    /// declaration and the build fails, because the operations it names would otherwise go unchecked.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor AuthCheckOperationsNotReadable = new(
+        id: "NF0109",
+        title: "Authorization check operations could not be read",
+        messageFormat: "The operations of authorization check '{2}' declared on '{1}' (auth type '{0}') could not be read, so the check cannot be generated. Pass a constant AuthorizeFactoryOperation value to [AuthorizeFactory(...)].",
+        category: CategoryUsage,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The generator reads the operations of each [AuthorizeFactory(...)] declaration from its bound attribute constant. If the argument does not bind to a constant AuthorizeFactoryOperation value, the operations cannot be known, and generating the check without them would leave those operations unchecked.");
+
+    /// <summary>
     /// NF0104: Hint name truncated due to length limit.
     /// </summary>
     public static readonly DiagnosticDescriptor HintNameTruncated = new(

@@ -30,7 +30,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 
 ## Out of Scope
 
-- Library code changes beyond new Design sample regions and the tests that pin them.
+- Library code changes beyond new Design sample regions and the tests that pin them. One exception, approved 2026-11-16: the generator fix in PITCH-009.
 - Carrying out the launch: posting, announcing, submitting anywhere.
 - The package icon (#40) and the downstream migration (Neatoo#126).
 - LazyLoad: nothing is written against it (CLAUDE.md, VisionAlignment R-K).
@@ -48,6 +48,7 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 | 005 | [005-component-docs](./plans/005-component-docs.md) | Component pages: why and when not | AC-4, AC-7, AC-8 | Draft | — |
 | 006 | [006-skill](./plans/006-skill.md) | The skill carries the same reasons | AC-5, AC-7 | Draft | — |
 | 007 | [007-launch-plan](./plans/007-launch-plan.md) | A plan for generating interest | AC-6 | Draft | — |
+| 009 | [009-auth-inheritance](./plans/009-auth-inheritance.md) | Inherited authorization checks are enforced | AC-4, AC-7 | Done | #45 |
 
 ---
 
@@ -66,6 +67,8 @@ Decide, with evidence, whether DTZero is useful to anyone but its author now tha
 ---
 
 ## Discovery Log
+
+- 2026-11-16 · Scope · The PITCH-005 probe found that the generator drops an authorization check an auth interface inherits, with no diagnostic, and cannot resolve one declared on an abstract base class. Keith ruled: fix the generator in this todo (PITCH-009), ahead of the authorization page. Out of Scope amended. Nine plans of a cap of eleven.
 
 ---
 
