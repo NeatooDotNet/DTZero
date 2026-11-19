@@ -92,7 +92,7 @@ Your own client ships with your server and is built from the same source, so it 
 
 ## Who it is for
 
-Teams building an application with a .NET client, where the client and the server are built and deployed together, and the domain has behavior worth keeping in one place. It is used in production with Blazor WebAssembly and with WPF.
+Teams building an application with a .NET client, where the client and the server are built and deployed together, and the domain has behavior worth keeping in one place. It is used in production with Blazor WebAssembly. A WPF client uses it the same way.
 
 It works with any class: an aggregate, a read model, a static command, a record. No base class is required. [DDD Concepts in DTZero](ddd-concepts.md) shows where each concept lands.
 
