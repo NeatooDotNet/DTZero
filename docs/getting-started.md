@@ -6,7 +6,7 @@ In [Why DTZero](the-problem.md) you saw the argument: write your domain model on
 
 - .NET 9.0 or 10.0 SDK
 - ASP.NET Core for server (optional — can use Logical mode for single-tier)
-- A .NET client. Blazor WebAssembly and WPF are the ones DTZero is used with in production
+- A .NET client. Blazor WebAssembly is the one DTZero is used with in production; WPF and other .NET clients use it the same way
 
 ## Project Structure
 
