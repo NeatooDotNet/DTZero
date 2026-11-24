@@ -26,9 +26,6 @@ Client                          Server
                                     ▼
                                LoadChildren (no [Remote] needed)
                                     │
-                                    ▼
-                               ValidateRules (no [Remote] needed)
-                                    │
 ◄─────────────────────────────── Return result
 ```
 
@@ -74,7 +71,7 @@ Most methods don't need `[Remote]` — and this is the common case:
 - Any method where the caller is already on the server
 - Local operations the client calls directly (above)
 
-A parent aggregate's `[Remote, Fetch]` method crosses to the server. From there, it can call child entity factories, collection factories, validation methods — none of which need `[Remote]` because execution is already server-side.
+A parent aggregate's `[Remote, Fetch]` method crosses to the server. From there, it can call child entity factories and collection factories — neither of which needs `[Remote]` because execution is already server-side.
 
 ## What Happens If You Get It Wrong
 
@@ -189,7 +186,7 @@ Enforce the boundary at the package level by excluding server-only dependencies 
 
 This reduces client bundle size and makes the boundary explicit — if your client project can't even reference `DbContext`, you can't accidentally call server-only code.
 
-For Blazor WASM apps where the domain assembly is shared, [IL Trimming](trimming.md) goes further — the IL trimmer removes server-only method bodies, their transitive dependencies, and the decompilable business logic from the published output. No assembly splitting required.
+For Blazor WASM apps where the domain assembly is shared, [IL Trimming](trimming.md) goes further — the IL trimmer removes server-only method bodies and their transitive dependencies from the published output, so the persistence code is not there to decompile. No assembly splitting required.
 
 ## Next Steps
 

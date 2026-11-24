@@ -4,7 +4,7 @@
 
 **How to use it:** Section 0 holds the rulings: 0.1 carried over from Neatoo, 0.2 made here. Sections 2 to 5 state DTZero's half of the model. Section 6 records the questions as asked, each marked with the ruling that answered it. Section 7 is the order of work.
 
-**Relation to the Neatoo document.** `Neatoo/docs/VisionAlignment.md` holds the whole model and Keith's rulings D1 to D19. This document carries over the parts that DTZero enforces, so that each statement lives in the repository of the framework that enforces it, and adds the questions the DTZero consistency audit (`Neatoo/docs/todos/consistency-audit/`, 86 findings at `2a7b438`) left for Keith.
+**Relation to the Neatoo document.** `Neatoo/docs/VisionAlignment.md` holds the whole model and Keith's rulings D1 to D30. This document carries over the parts that DTZero enforces, so that each statement lives in the repository of the framework that enforces it, and adds the questions the DTZero consistency audit (`Neatoo/docs/todos/consistency-audit/`, 86 findings at `2a7b438`) left for Keith.
 
 **What I read:** both VisionAlignment sections 0, 2, 3, 6 and 7; all 86 audit findings and the audit README; the SKR todo; this repository's `CLAUDE.md`, `skills/DTZero/SKILL.md`, `src/Design/CLAUDE-DESIGN.md` headings and the anti-pattern and setter sections, the `[Factory]` type inventory of `Design.Domain`, `OrderLine.cs` and `Order.cs` operation signatures, `Money.cs`, `DesignClientServerContainers.cs`, `mdsnippets.json`, `.gitattributes`, `build.yml`, issue #12, and the NuGet registration index. I have not re-verified the audit's 86 findings against HEAD; the 35 commits since `2a7b438` are the DICT todo and the v1.10.1 release.
 
@@ -148,7 +148,7 @@ DTZero's column of the Neatoo document's table, corrected to the rulings. Neatoo
 
 ## 4. The skill's habit-trap rows that DTZero owns
 
-The rubric is shared with the Neatoo skill (`Neatoo/docs/todos/SKR-neatoo-skill-rebuild/todo.md`); the T-numbers are kept so a fresh-session test is one list. Each DTZero `SKILL.md` carries a pointer block naming the other skill's rows; no content is copied.
+The rubric is shared with the Neatoo skill (`Neatoo/docs/todos/completed/SKR-neatoo-skill-rebuild/todo.md`); the T-numbers are kept so a fresh-session test is one list. Each DTZero `SKILL.md` carries a pointer block naming the other skill's rows; no content is copied.
 
 | # | The question the habit asks | DTZero's answer | Compiled example | State |
 |---|---|---|---|---|

@@ -88,7 +88,7 @@ See [Save Operation](save-operation.md) for the routing table and every outcome.
 
 ### IFactorySave&lt;T&gt;
 
-The generator implements this on each class factory whose class implements `IFactorySaveMeta`. It registers the factory under it, keyed on the class itself (`IFactorySave<Order>`), and implements it explicitly. Its members are:
+The generator implements this on each class factory whose class implements `IFactorySaveMeta` and whose `[Insert]`, `[Update]` and `[Delete]` take no parameters other than services. It registers the factory under it, keyed on the class itself (`IFactorySave<Order>`), and implements it explicitly. Its members are:
 - `Save(T entity, CancellationToken)`, which returns `Task<IFactorySaveMeta?>`;
 - `CanSave(CancellationToken)`;
 - `CanSave(T target, CancellationToken)`.
