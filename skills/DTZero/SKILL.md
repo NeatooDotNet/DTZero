@@ -1,8 +1,8 @@
 ---
 name: DTZero
 description: |
-  Use when building or reviewing a DTZero domain library, or when asking the questions a mainstream .NET habit asks of it - how do I load-or-create, can I [Create] from loaded data, how does the client call the repository, where does my application service go, who writes a child's row, does Save() update my object, which services can a constructor take, should a child's [Insert] be [Remote], does [Remote] mean "runs on the server", my command needs the server so plain [Execute], should this screen get a DTO from a controller. Also triggers on "DTZero", [Factory], [Create], [Fetch], [Insert], [Update], [Delete], [Execute], [Remote], [Service], IFactorySaveMeta, "Save routing", [AuthorizeFactory], [AspAuthorize], [FactoryEventHandler<T>], FactoryEventBase, IFactoryEvents, IFactoryEventRelay, RaiseOptions, ServerOnly, DispatchPhase, AfterFlush, AfterCommit, IFactoryEventPhaseCoordinator, Coalesce, "domain events", UseDTZero, AddDTZeroAspNetCore, AddDTZero, "IL trimming", PublishTrimmed, DTZeroRuntime, IsServerRuntime. DTZero works with any class: a Neatoo entity, a read model, a context, a static command, a record. Neatoo's editing session (rules, change tracking, the UI contract) is the Neatoo skill's, loaded beside this one.
-version: 2.0.0
+  Use when building or reviewing a DTZero domain library, or when asking the questions a mainstream .NET habit asks of it - how do I load-or-create, can I [Create] from loaded data, how does the client call the repository, where does my application service go, who writes a child's row, does Save() update my object, which services can a constructor take, should a child's [Insert] be [Remote], does [Remote] mean "runs on the server", my command needs the server so plain [Execute], should this screen get a DTO from a controller, where does [Authorize] go without a controller, can I trust the object the client sent, does my public API need DTOs. Also triggers on "DTZero", [Factory], [Create], [Fetch], [Insert], [Update], [Delete], [Execute], [Remote], [Service], IFactorySaveMeta, "Save routing", [AuthorizeFactory], [AspAuthorize], [FactoryEventHandler<T>], FactoryEventBase, IFactoryEvents, IFactoryEventRelay, RaiseOptions, ServerOnly, DispatchPhase, AfterFlush, AfterCommit, IFactoryEventPhaseCoordinator, Coalesce, "domain events", UseDTZero, AddDTZeroAspNetCore, AddDTZero, "IL trimming", PublishTrimmed, DTZeroRuntime, IsServerRuntime. DTZero works with any class: a Neatoo entity, a read model, a context, a static command, a record. Neatoo's editing session (rules, change tracking, the UI contract) is the Neatoo skill's, loaded beside this one.
+version: 2.0.1
 ---
 
 # DTZero
@@ -10,6 +10,25 @@ version: 2.0.0
 DTZero is a Roslyn source generator for 3-tier .NET applications. When the library that holds the domain objects is loaded on both tiers, the client/server seam needs no DTOs and no controllers: DTZero generates the factories and their serialization at compile time, and one endpoint carries every call. It works with any class that carries `[Factory]` - a Neatoo entity, a plain class, a static command, a record.
 
 Every C# block in this skill and its references is compiled and tested in DTZero's `src/Design` projects, on real client and server containers. The only hand-written code is a short block labelled WRONG.
+
+## Why it exists, and when not to use it
+
+DTOs, API controllers and mapping code were a workaround. A domain model could not run in a JavaScript client, so the server flattened its objects and the client rebuilt them. With a .NET client that boundary is gone, and the layers remain only as habit. An assistant trained on mainstream .NET brings the habit with it; this skill exists to replace it.
+
+What follows from that:
+
+- **The graph that crosses is the model, not the tables.** The persistence model stays on the server, behind `[Service]` parameters. DTZero supplies no repository and puts no ORM on the client.
+- **Factory methods call factory methods.** The client calls one factory method, and that call crosses. From there each object's factory method calls the next on the server, and nothing else crosses. That is how an aggregate is loaded and stored as a whole.
+- **Root and child are roles, not kinds of class.** An entity is a root where the client calls its factory method and a child where another factory method does.
+- **Authorization lives on the factory,** so every path to an object is under the same rules.
+- **`/api/dtzero` is not a public API.** Outside callers get hand-written endpoints that call the same factories ([advanced-patterns.md](references/advanced-patterns.md#a-public-api-over-the-same-factories)).
+
+Do not propose DTZero, and say so if asked to add it, when:
+
+- the only client is not .NET;
+- the application is Blazor Server only, with no client tier planned;
+- it is thin CRUD with no behavior worth keeping in one place;
+- client and server are versioned and deployed apart for long periods.
 
 ## The model
 
@@ -46,8 +65,11 @@ A mainstream .NET developer reaches for these under load. Each row is the questi
 | Does `[Remote]` mean "runs on the server"? | No. It marks where the client's call crosses. A method without it runs on the tier that calls it; once on the server, a `[Remote]` method called there runs locally, with no second round trip. | The checkout context's `Fetch` [below](#which-factory-shape), which calls the order's `[Remote]` Fetch on the server |
 | My command needs the server, so plain `[Execute]`? | `[Execute]` obeys `[Remote]`. Bare, it runs on whichever tier resolves it, with that tier's services: a client-side engine. With `[Remote]`, the client crosses. `internal` without `[Remote]` is server-only. | The three placements [below](#execute-obeys-remote); [static-factory.md](references/static-factory.md) |
 | I'll return a DTO from a controller for this screen? | No DTO class and no controller: the one assembly on both tiers is the point. A screen's server truth is a read model - a plain `[Factory]` class with `[Fetch]` only, which the client holds - or, for a call that returns and is done, an interface-factory method returning a record. | `OrderSummary` [below](#read-model) |
+| Where does `[Authorize]` go, now that there is no controller? | On the factory. `[AuthorizeFactory<T>]` names a class of rules with injected services; the server enforces them on every path to the object, and the client asks the same rules through `CanCreate`, `CanFetch` and `CanSave`. Broad rules shared by every type go on a base auth class. `[AspAuthorize]` is for a policy the screen never needs to ask about. | `AuthorizationBase` and `QuoteAuth` in [advanced-patterns.md](references/advanced-patterns.md#a-shared-authorization-base) |
+| The object arrived on the server, so I can trust its state? | No. It was built on the client. A rule that protects a record reads the stored record by the object's id, in a `[Remote] internal` check. A rule that reads the sent object is guidance for the screen. | `LockableOrderAuth` in [advanced-patterns.md](references/advanced-patterns.md#what-the-client-sends-is-input) |
+| Outside callers need an API, so I expose `/api/dtzero` or rewrite the logic behind DTOs? | Neither. Hand-written endpoints with a designed contract type, calling the same factories and domain methods. The contract is designed; the logic is the one copy. | `PublicOrder` and its endpoints in [advanced-patterns.md](references/advanced-patterns.md#a-public-api-over-the-same-factories) |
 
-**Neatoo's questions.** The Neatoo skill, loaded beside this one, answers these; they are listed here so the two skills read as one list. Where do I validate before Save? Where do I throw when input is bad? Nobody edits this, so plain EF? Where do the screen's derived values and visibility go? How do I set a value in Fetch without marking it modified? How do I get computed values after Fetch - `RunRules(All)` at the end? The parent saves its children's rows? A rule can't call the server? Value object, so `ValidateBase`? Can I call `Save()` on a child? Its model is the half this skill assumes: what an operation sets is baseline; Neatoo is the editing session; a fact is a property, a consequence is a rule, an intent is a verb and survives only for what state cannot hold; the UI binds and adapts gestures and decides nothing. Its decision on Neatoo or plain DTZero says when a type needs Neatoo's base classes.
+**Neatoo's questions.** The Neatoo skill, loaded beside this one, answers these; they are listed here so the two skills read as one list. This gesture needs a method on the entity? Where do I validate before Save? Where do I throw when input is bad? Nobody edits this, so plain EF? Where do the screen's derived values and visibility go? How do I set a value in Fetch without marking it modified? How do I get computed values after Fetch - `RunRules(All)` at the end? The parent saves its children's rows? A rule can't call the server? Value object, so `ValidateBase`? Can I call `Save()` on a child? My rule assigns a property; is that enough? Can a rule react to `IsValid` or `IsBusy`? Writing the loaded value back undoes the edit? Its model is the half this skill assumes: what an operation sets is baseline; Neatoo is the editing session; a fact is a property, a consequence is a rule, an intent is a verb and survives only for what state cannot hold; the UI binds and adapts gestures and decides nothing. Its decision on Neatoo or plain DTZero says when a type needs Neatoo's base classes.
 
 ## The decisions
 
@@ -236,7 +258,7 @@ internal async Task<bool> Fetch(Guid id, [Service] IOrderDbContext db)
     return true;
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L144-L204' title='Snippet source file'>snippet source</a> | <a href='#snippet-skill-orderline-root-and-child' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L145-L205' title='Snippet source file'>snippet source</a> | <a href='#snippet-skill-orderline-root-and-child' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### `[Execute]` obeys `[Remote]`
@@ -350,6 +372,32 @@ internal partial class OrderSummary : IOrderSummary
 
 A static method has no promotion to do: on a static factory or a class-level static `[Execute]`, `[Remote]` alone decides whether the client crosses. IL trimming removes the guarded bodies from the published client: [trimming.md](references/trimming.md).
 
+## When to leave a piece out
+
+Each piece exists to remove something you would otherwise write. Where there is nothing to remove, leave it out.
+
+| Piece | Leave it out when |
+|---|---|
+| `[Create]` | The type is only ever loaded, such as a read model |
+| `[Fetch]` | The type is built and handed back but never stored |
+| `[Insert]`, `[Update]`, `[Delete]`, `Save`, `IFactorySaveMeta` | The type has no stored lifecycle: a read model, a command |
+| `[Execute]` | The work is one object's lifecycle. Then it is a Create, a Fetch or a write |
+| `[Remote]` | Only the server calls the method: a child's operations, anything a root's operation calls. Also a Create that needs nothing from the server |
+| A collection factory | The children are never written. A plain `List<T>` will do |
+| Lifecycle hooks | The same lines would not otherwise open or close every operation on the type |
+| `[Service]` | The caller supplies the value. Or every instance needs the service on both tiers; then it is a constructor parameter |
+| An interface factory | Only the server uses the service. That is a plain interface taken as a `[Service]` parameter |
+| A factory event | The change is the aggregate's own, the step is one the operation cannot succeed without, or only the caller needs the answer. Not for delivery that must survive a failure: handlers run in process |
+| Any authorization on a type | The type is only reached from server code that has already checked, such as a child loaded by its root. The root's factory is the entry point |
+| `[AuthorizeFactory<T>]` | The rule is only "an authenticated request with this role" and the screen never asks. `[AspAuthorize]` says that |
+| `[AspAuthorize]` | The screen must ask before it acts, the rule depends on the record, or the type is used with no HTTP request |
+| A shared auth base | Types have no rule in common. A base with one user is an extra file |
+| A rule that reads the stored record | The state is one the user may change themselves. It costs a read on every save |
+| Authorization, as a way to say "not yet" | The object is in a state the user can change, such as a draft with no lines. That is a verdict the object reports through a property the screen reads (`Order.CanSubmit`), not a refusal |
+| The Named serialization format | You do not need to read payloads in a network trace. Both tiers must switch together |
+| Logical mode | The client has a server: a `[Remote]` operation would run in the client. Also as the only test of something that crosses, because it serializes nothing |
+| IL trimming | The client is not published trimmed, or the domain assembly holds little that is server-only. It has a real cost: [trimming.md](references/trimming.md#what-it-costs) |
+
 ## Mechanism quick reference
 
 | Question | Answer |
@@ -366,6 +414,7 @@ A static method has no promotion to do: on a static factory or a class-level sta
 | Where must an operation's event be raised? | Inside the operation, through a `[Service] IFactoryEvents` |
 | Fire-and-forget external IO from an operation? | Not a factory event: `Task.Run` with a new scope from `IServiceScopeFactory`, snapshotting any ambient context first |
 | Can several types share a base class? | Yes: `[Factory]` on each concrete type; the base's operation methods join each one's factory, and `[Factory]` on an abstract or generic base does nothing. [polymorphic-hierarchy.md](references/polymorphic-hierarchy.md) |
+| Can auth classes share a base? | Yes: an abstract base holds the broad checks, each type's auth class inherits it, and the factory names the derived class. Inherited checks are enforced; a restated one combines operations. NF0107, NF0108 and NF0109 report a check that cannot be enforced. [advanced-patterns.md](references/advanced-patterns.md#a-shared-authorization-base) |
 | How do I keep server code out of the Blazor bundle? | IL trimming with the `IsServerRuntime` switch set to `false`. [trimming.md](references/trimming.md) |
 | How do I wire the server and the client? | `AddDTZeroAspNetCore` and `UseDTZero()` on the server; `AddDTZero` in Remote mode and a keyed `HttpClient` on the client. [setup.md](references/setup.md) |
 | Where does business logic go? | In the entity, not the factory: first as a property a later reader needs and the rules that follow from it, a verb only for intent the state cannot hold. The Neatoo skill places it. |
@@ -396,7 +445,7 @@ Each file is a mechanism reference under the decisions above.
 - [service-injection.md](references/service-injection.md) - constructor injection on both tiers, `[Service]` parameters where the method runs, child entities
 - [setup.md](references/setup.md) - server and client configuration, the Blazor page
 - [factory-events.md](references/factory-events.md) - handlers, dispatch phases, coalescing, the client relay, `RaiseOptions`
-- [advanced-patterns.md](references/advanced-patterns.md) - authorization, correlation, entity duality, value objects, child collections, testing on client and server containers
+- [advanced-patterns.md](references/advanced-patterns.md) - authorization, a shared auth base, rules that read the stored record, a public API over the same factories, correlation, entity duality, value objects, child collections, testing on client and server containers
 - [polymorphic-hierarchy.md](references/polymorphic-hierarchy.md) - concrete types over an abstract base: what a derived `[Factory]` inherits, and what it must declare itself
 - [trimming.md](references/trimming.md) - IL trimming for the Blazor client
 - [anti-patterns.md](references/anti-patterns.md) - the mistakes, each labelled WRONG, with the fix

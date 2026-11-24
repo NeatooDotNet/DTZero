@@ -177,6 +177,8 @@ public class ProductCatalog : IProductCatalog { ... }
 
 When the client holds an object, edits it and saves it, use a [Class Factory](factory-operations.md). When it binds to a read-only object, use a `[Fetch]`-only class factory.
 
+Leave it out for a service only the server uses. That is a plain interface taken as a `[Service]` parameter, with no `[Factory]`. A repository is that kind of service.
+
 ## Next Steps
 
 - [Decision Guide](decision-guide.md#which-factory-pattern): choosing between factory patterns

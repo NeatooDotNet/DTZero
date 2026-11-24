@@ -7,6 +7,8 @@ nav_order: 11
 
 The interfaces DTZero defines: what each one's members are, who implements it, and which page covers it in full. The code comes from DTZero's compiled example set, `src/Design`.
 
+Most applications implement one of these, `IFactorySaveMeta`, and `IFactoryEventRelay` if the client listens for events. Leave the lifecycle hooks out unless the same lines would otherwise surround every operation on a type. The generator or the library implements the rest.
+
 ## Lifecycle Hooks
 
 An object implements a hook interface to have the factory call it around its operations. The hooks prepare state and record what happened. They are not checks: a check the user can recover from is a verdict the screen reads before it acts, and a throw is for broken state.
@@ -86,7 +88,7 @@ See [Save Operation](save-operation.md) for the routing table and every outcome.
 
 ### IFactorySave&lt;T&gt;
 
-The generator implements this on each class factory whose class implements `IFactorySaveMeta`. It registers the factory under it, keyed on the class itself (`IFactorySave<Order>`), and implements it explicitly. Its members are:
+The generator implements this on each class factory whose class implements `IFactorySaveMeta` and whose `[Insert]`, `[Update]` and `[Delete]` take no parameters other than services. It registers the factory under it, keyed on the class itself (`IFactorySave<Order>`), and implements it explicitly. Its members are:
 - `Save(T entity, CancellationToken)`, which returns `Task<IFactorySaveMeta?>`;
 - `CanSave(CancellationToken)`;
 - `CanSave(T target, CancellationToken)`.

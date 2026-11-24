@@ -99,7 +99,7 @@ internal partial class MyChild : IMyChild
     internal void Insert(MyChildRow row) { }  // maps itself into the row its list hands it
 }
 ```
-**Generates**: `public IMyChildFactory` with a public `Create()`; `Fetch()` and `Save(target, row)` are `internal` interface members the server-side cascade calls. A child's `[Create]` is its one public operation (VisionAlignment R-C). For the save and load cascade, in which each object maps its own row, see `Order.cs`, `OrderLine.cs` and `OrderPersistence.cs` (R-D).
+**Generates**: `public IMyChildFactory` with a public `Create()`; `Fetch()` and `Save(target, row)` are `internal` interface members the parent's factory methods call on the server. A child's `[Create]` is its one public operation (VisionAlignment R-C). For loading and saving the aggregate, where factory methods call factory methods and each object maps its own row, see `Order.cs`, `OrderLine.cs` and `OrderPersistence.cs` (R-D).
 
 ### Pattern 2: Interface Factory (a domain service the client calls)
 ```csharp
@@ -381,7 +381,7 @@ services.AddDTZero(DTZeroFactory.Remote, typeof(Order).Assembly);
 | Can [Execute] return void? | No; `Task` when there is no result, `Task<T>` when the caller needs one | `AllPatterns.cs` (`_SendNotification`, `_Notify`) | Request-response: the caller awaits completion whether the call is local or remote |
 | How do I load-or-create (open, start, ensure)? | A class-level `[Remote, Execute]` that calls Fetch, then Create, through its own injected factory. Never a `[Create]` that looks for an existing object or a `[Fetch]` that makes one (D3, D11) | `Order.cs` (`OpenDraft`, `FetchDraft`), `CreateOrFetchTests.cs` | One round trip; the caller gets a fetched or a new, unsaved object, and each operation does what its name says |
 | Does my value object need `[Factory]`? | Only when constructing it needs a service or authorization. Otherwise it is a plain record, built with `new`, whose constructor throws on an invalid value (R-F) | `Money.cs` (`Money`, `Percentage`), `TaxRate.cs` | A factory with no service adds an interface, a registration and an injected parameter at every construction site, and buys nothing |
-| Where does business logic go? | In the entity, not the factory | `Order.cs:229-242` | DDD principle |
+| Where does business logic go? | In the entity, not the factory: first as a property a later reader needs, a verb only for intent the state cannot hold | `Order.cs` (`CanSubmit`, `Submit`, `Cancel`) | DDD principle |
 | Can I store method-injected services? | Only if using constructor injection | `AllPatterns.cs:86-96` | Fields lost after serialization |
 | Does constructor injection affect ordinal serialization? | Yes -- a class with no parameterless or all-default-parameter ctor causes the generator to skip `IOrdinalSerializable`; the type then deserializes via the named/DI path (`GetRequiredService`), which resolves the ctor parameters from the DI container on each side of the wire | `CtorInjectionExample.cs`, `SerializationTests.cs` (`CtorInjectedEntity_*` tests) | Ordinal `FromOrdinalArray` uses object-initializer / positional construction and does not resolve DI. The generator's `RequiresServiceInstantiationCheck` looks only at ctor shape (parameter count, default values) -- not at `[Service]` attribute presence |
 | Which authorization approach? | `[AuthorizeFactory<T>]` for domain-specific rules; `[AspAuthorize]` for ASP.NET Core policies | Class factory: `AuthorizedOrder.cs`. Interface factory: `CustomerDirectory.cs`. ASP.NET: `SecureOrder.cs` | AuthorizeFactory gives client-side Can* methods; AspAuthorize leverages existing ASP.NET Core policies |
@@ -591,7 +591,7 @@ internal partial class OrderLine : IOrderLine
 }
 ```
 
-**RIGHT:** `OrderLine.cs` — the root `Fetch(Guid id)` is `[Remote]`; the child `Fetch(OrderLineRow row)`, `Insert` and `Update` are plain `internal`; `Create` is `public` and local (R-C). `OrderLineDualityTests` loads a line as a root from the client and the order cascade still loads and saves it as a child.
+**RIGHT:** `OrderLine.cs` — the root `Fetch(Guid id)` is `[Remote]`; the child `Fetch(OrderLineRow row)`, `Insert` and `Update` are plain `internal`; `Create` is `public` and local (R-C). `OrderLineDualityTests` loads a line as a root from the client and the order still loads and saves it as a child.
 
 **Why it matters:** [Remote] is about *how the method is called*, not *what the type is*. The factory-method signature is the difference (R-G): a key for the root, the parent's row for the child.
 
@@ -1209,8 +1209,8 @@ infrastructure already exists.
 | `Design.Domain/Aggregates/ParamAuthOrder.cs` | Parameterized [AuthorizeFactory<T>] with type-matched and target entity params |
 | `Design.Domain/Aggregates/ParamAuthOrderAuth.cs` | Auth interface and implementation with parameterized methods |
 | `Design.Domain/Aggregates/SecureOrder.cs` | [AspAuthorize] policy-based authorization patterns |
-| `Design.Domain/Entities/OrderLine.cs` | Child entity and child list: public local Create, row-mapped Fetch/Insert/Update, the list's R-D cascade; and the line as a root, a `[Remote, Fetch]` by id (entity duality, R-G) |
-| `Design.Domain/Aggregates/OrderPersistence.cs` | The order's rows and `IOrderDbContext`, the store Order's operations inject; the cascade in outline |
+| `Design.Domain/Entities/OrderLine.cs` | Child entity and child list: public local Create, row-mapped Fetch/Insert/Update, the list's Save, which writes each child (R-D); and the line as a root, a `[Remote, Fetch]` by id (entity duality, R-G) |
+| `Design.Domain/Aggregates/OrderPersistence.cs` | The order's rows and `IOrderDbContext`, the store Order's operations inject; the load and save chain in outline |
 | `Design.Domain/ValueObjects/Money.cs` | Plain-record value objects (`Money`, `Percentage`): no factory, constructors throw (R-F) |
 | `Design.Domain/ValueObjects/TaxRate.cs` | A value object that carries `[Factory]` because its construction needs a server-only service: static `[Remote, Fetch]`, null for an unknown key |
 | `Design.Domain/FactoryPatterns/FactoryEventHandlerPattern.cs` | `[FactoryEventHandler<T>]` class attribute with `static` method — server-side handler running in the caller's DI scope (shared DbContext/transaction), sequential, awaited |

@@ -1,5 +1,7 @@
 # Factory Events
 
+A side effect that belongs to another part of the model should not be written into the aggregate that caused it. Whether it runs inside the transaction is a decision, so the handler declares it. Factory events let an operation say what happened, and leave to each handler what follows and when.
+
 DTZero's factory-event surface is a mediator pattern: factory methods raise strongly-typed events via `IFactoryEvents.Raise<T>`, server-side static handlers decorated with `[FactoryEventHandler<T>]` process them in the caller's DI scope, and captured events flow back to the client through a consumer-implemented `IFactoryEventRelay`. Each handler declares *when* it runs via the attribute's optional [`DispatchPhase`](#dispatch-phases) argument — the default, `Immediate`, is the contract in the table below.
 
 | Aspect | Behavior (`Immediate` phase — the default) |
@@ -481,6 +483,13 @@ This model also drives discovery: `FactoryEventBase` carries `[FactoryEvent]` wi
 See [IL Trimming](trimming.md#factory-event-type-preservation) for the full mechanism, the end-to-end publish-trimmed verification (`EventSubscribeOnlySmokeTest.cs` — the subscribe-only consumer shape — plus the `EventRelaySmokeTest.cs` round-trip), and the `IL2091` consideration for user code that forwards `Raise<T>` through its own generic wrapper.
 
 ---
+
+## When to Leave Events Out
+
+- **A change to the aggregate's own state.** Make it in the operation. An event is for a side effect another part of the model owns.
+- **A step the operation cannot succeed without, and that belongs to it.** Call it directly. Raising an event to reach it only hides the dependency.
+- **An answer only the caller needs.** Return it. An event is for listeners the caller does not know.
+- **Delivery that must survive a failure.** Handlers run in process, in the caller's scope, and deferred work is discarded when the call throws. For durable delivery to another process, use an outbox or a message bus, and write to it from a handler.
 
 ## Decision Guide
 

@@ -700,6 +700,12 @@ public partial class Factory
 		public AuthorizeFactoryOperation AuthorizeFactoryOperation { get; private set; }
 
 		/// <summary>
+		/// Marks the check [Remote] because another declaration of the same check carries [Remote]
+		/// (the declarations are combined; see GetAuthMethodsRecursive).
+		/// </summary>
+		public void MarkRemote() => this.IsRemote = true;
+
+		/// <summary>
 		/// When ClassName is an interface, this holds the concrete implementing class name.
 		/// Null when ClassName is already a concrete class or no implementation was found.
 		/// </summary>

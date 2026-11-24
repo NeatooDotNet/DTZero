@@ -223,10 +223,10 @@ internal partial class Order : IOrder, IFactorySaveMeta, IFactoryOnStartAsync, I
     //   IsNew=true -> Insert; IsNew=false, IsDeleted=false -> Update;
     //   IsNew=false, IsDeleted=true -> Delete.
     //
-    // THE CASCADE (R-D): Insert and Update make or find the order's row, map the
-    //   order into it, hand the row's line collection to the list factory's Save,
-    //   and flush once. The list and each line do the rest; the root never maps a
-    //   line.
+    // SAVING THE LINES (R-D): factory methods call factory methods. Insert and
+    //   Update make or find the order's row, map the order into it, hand the
+    //   row's line collection to the list factory's Save, and flush once. The
+    //   list and each line do the rest; the root never maps a line.
     //
     // DESIGN DECISION: A missing row in Update or Delete is an exception
     //   The order was loaded, so its row existing is the expected state; a row

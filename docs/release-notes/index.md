@@ -16,6 +16,7 @@ Releases with new features, breaking changes, or bug fixes.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| [v2.0.1](v2.0.1.md) | 2026-11-16 | **Security fix**: an authorization check that the auth type in `[AuthorizeFactory<T>]` inherited from a base interface, or carried on an interface its class implements, was **not enforced**, with no diagnostic. It is now enforced. A check on an abstract base class no longer stops the server at startup, so a shared authorization base works. A check declared in more than one place runs for the operations of every declaration. A check the generator cannot enforce fails the build: **NF0107** (declared in a referenced assembly), **NF0108** (not callable on the auth type), **NF0109** (operations unreadable). Unchanged for an auth type that declares its own checks. In an affected project a guarded factory method can become asynchronous. |
 | [v2.0.0](v2.0.0.md) | 2026-11-11 | **Breaking**: the first release under the DTZero name. Every public name changes, and behavior does not. |
 | [v1.10.9](v1.10.9.md) | 2026-10-16 | **Fix**: a refusal from `[AuthorizeFactory<T>]` on an **interface-factory method or a static `[Execute]`** escaped `UseDTZero()` as an **HTTP 500**, so the client threw `HttpRequestException` and the type, message and `Context` were lost (#10). The endpoint now answers 403 with a body marked `X-DTZero-Not-Authorized`, and the client rethrows the same `NotAuthorizedException`. Refusals are logged at Warning (server, 7009) and Information (client, 3013), not as failures. A 403 without the header still throws `HttpRequestException`. Update client and server; no breaking changes. |
 | [v1.10.8](v1.10.8.md) | 2026-10-16 | **Fix**: when the browser abandoned a remote call (reload, navigation), the endpoint let the `OperationCanceledException` escape, so the server **recorded an HTTP 500 and request logging wrote it at Error** with a stack trace (#15). A client that leaves now ends the request with 499 and nothing escapes. A server that is stopping answers 503, which the client reads as `HttpRequestException.StatusCode`. Any other cancellation still fails as a 500. Update the server; no breaking changes. |
@@ -80,6 +81,7 @@ Releases with new features, breaking changes, or bug fixes.
 
 ## All Releases
 
+- [v2.0.1](v2.0.1.md) - 2026-11-16 - **Security fix**: inherited authorization checks are enforced; a shared authorization base works; NF0107, NF0108 and NF0109 report a check that cannot be enforced. In an affected project a guarded factory method can become asynchronous.
 - [v2.0.0](v2.0.0.md) - 2026-11-11 - **Breaking**: the first release under the DTZero name.
 - [v1.10.9](v1.10.9.md) - 2026-10-16 - **Fix**: an interface-factory or static `[Execute]` authorization refusal reaches the client over HTTP as `NotAuthorizedException`, not a 500 (#10). Update client and server. No breaking changes.
 - [v1.10.8](v1.10.8.md) - 2026-10-16 - **Fix**: a client disconnect mid-call is no longer recorded as HTTP 500 at Error (#15); it ends with 499, and a shutdown answers 503. No breaking changes.

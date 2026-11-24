@@ -1,6 +1,14 @@
 # Authorization
 
-DTZero replaces controllers, so authorization moves from controller actions to the factory. You define a rule once, and the generated factory checks it wherever the operation runs. The client can ask `CanCreate()` before it offers a "New" button, and the server enforces the same rule before a Fetch or a Save runs.
+## Why Authorization Lives on the Factory
+
+With controllers, a rule about who may do what is written in several places. `[Authorize]` goes on each action. The check on the record goes inside the action. The screen needs the same answer to hide a button, so the client writes it again. A second entry point, such as a public API or a background job, is one more place that can forget the rule.
+
+In DTZero every path to an object goes through its factory: the application's client, a public endpoint, server code that loads the aggregate. So the rule goes there, once:
+
+- **One class holds the rules.** It takes what it decides from by constructor, such as the signed-in user or a store.
+- **The server enforces them** before the operation runs, whichever entry point made the call.
+- **The client asks the same class** through `CanCreate()`, `CanFetch()` and `CanSave()`, to decide what to show.
 
 The code on this page comes from DTZero's compiled example set, `src/Design`.
 
@@ -122,6 +130,76 @@ if (factory.CanCreate().HasAccess)   // the rules Create runs, asked first: show
 ```
 <sup><a href='/src/Design/Design.Tests/FactoryTests/AuthorizationTests.cs#L407-L412' title='Snippet source file'>snippet source</a> | <a href='#snippet-authorization-generated' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
+
+## A Shared Authorization Base
+
+Most applications have a few broad rules that hold for every type: signed in to read, a role to write. Declare them once, on a base class:
+
+<!-- snippet: authorization-base -->
+<a id='snippet-authorization-base'></a>
+```cs
+public abstract class AuthorizationBase(ICurrentUser user)
+{
+    protected ICurrentUser User { get; } = user;
+
+    [AuthorizeFactory(AuthorizeFactoryOperation.Read)]
+    public bool IsSignedIn() => User.IsAuthenticated;
+
+    [AuthorizeFactory(AuthorizeFactoryOperation.Write)]
+    public bool CanWrite() => User.IsInRole(OrderRoles.Sales);
+}
+```
+<sup><a href='/src/Design/Design.Domain/Aggregates/AuthorizationBase.cs#L41-L52' title='Snippet source file'>snippet source</a> | <a href='#snippet-authorization-base' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+Each type's auth class inherits the base and adds only the checks of its own:
+
+<!-- snippet: authorization-base-derived -->
+<a id='snippet-authorization-base-derived'></a>
+```cs
+public class QuoteAuth(ICurrentUser user) : AuthorizationBase(user)
+{
+    [AuthorizeFactory(AuthorizeFactoryOperation.Delete)]
+    public bool CanDelete() => User.IsInRole(OrderRoles.Manager);
+}
+```
+<sup><a href='/src/Design/Design.Domain/Aggregates/QuoteAuth.cs#L26-L32' title='Snippet source file'>snippet source</a> | <a href='#snippet-authorization-base-derived' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+The factory names the derived class:
+
+<!-- snippet: authorization-base-apply -->
+<a id='snippet-authorization-base-apply'></a>
+```cs
+[Factory]
+[AuthorizeFactory<QuoteAuth>]
+internal partial class Quote : IQuote, IFactorySaveMeta, IFactoryOnCompleteAsync
+```
+<sup><a href='/src/Design/Design.Domain/Aggregates/Quote.cs#L36-L40' title='Snippet source file'>snippet source</a> | <a href='#snippet-authorization-base-apply' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+A `Quote` Fetch runs `IsSignedIn`. An Insert or an Update runs `CanWrite`. A Delete runs `CanWrite` and `CanDelete`, and both must pass. `QuoteAuth` restates neither inherited check.
+
+Name the class, not an interface, when the checks sit on a base class: an interface cannot inherit from a class, so those checks would be out of its reach. Only the auth type the factory names is registered. The base is never a service of its own.
+
+### What Is Inherited
+
+The generator reads every check in the auth type's hierarchy (since v2.0.1):
+
+- **An auth interface** inherits the checks of the interfaces it extends.
+- **An auth class** inherits the checks of its base classes and of the interfaces it implements.
+- **An override** runs the derived version, once.
+- **A check declared again with `[AuthorizeFactory]`** in a derived type runs for the operations of both declarations. A restatement adds operations and never removes one. If either declaration is `[Remote]`, the check is remote for all of them.
+
+A check the generator cannot enforce fails the build:
+
+| Diagnostic | Cause | Fix |
+|---|---|---|
+| NF0107 | The check is declared in a referenced assembly, so the generator cannot read it | Declare the check on the auth type, or on another type in the same project |
+| NF0108 | The auth class implements the check explicitly, or leaves it to a default interface implementation | Implement it as a public method, or name the interface in `[AuthorizeFactory<T>]` |
+| NF0109 | The operations in `[AuthorizeFactory(...)]` could not be read | Pass a constant `AuthorizeFactoryOperation` value |
+
+A generic base auth interface, such as `IAuthBase<TEntity>`, is not supported.
 
 ## AspAuthorize
 
@@ -246,6 +324,72 @@ bool CanWrite(IParamAuthOrder target);
 
 Create and Fetch rules are unaffected.
 
+## What the Client Sends Is Input
+
+The object that arrives in a Save was built on the client. The server runs the rules, but the rules can only be as trustworthy as what they read.
+
+`ParamAuthOrderAuth.CanWrite` above reads `target.Status`. That is the status the client sent. A client that changes `Locked` to `Active` before it saves passes the rule. A rule like that is right for guiding the screen, and for state the user is allowed to change. It does not protect a record from a caller who edits what they send.
+
+A rule that protects the record reads the record. The target supplies the id, and the store supplies the state:
+
+<!-- snippet: authorization-stored-record -->
+<a id='snippet-authorization-stored-record'></a>
+```cs
+public interface ILockableOrderAuth
+{
+    // [Remote] internal: the store is server-only, and CanSave(target) asks the server
+    [Remote]
+    [AuthorizeFactory(AuthorizeFactoryOperation.Write)]
+    internal Task<bool> CanWrite(ILockableOrder target);
+}
+
+public class LockableOrderAuth(ILockableOrderStore store) : ILockableOrderAuth
+{
+    // The target supplies the id; the stored row supplies the status.
+    public async Task<bool> CanWrite(ILockableOrder target)
+        => await store.FindAsync(target.Id) is not { Status: LockableOrderStatus.Locked };
+}
+```
+<sup><a href='/src/Design/Design.Domain/Aggregates/LockableOrderAuth.cs#L30-L45' title='Snippet source file'>snippet source</a> | <a href='#snippet-authorization-stored-record' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+The store is a server-only service, so the check is `[Remote] internal`: it runs on the server, and `CanSave(target)` asks the server. A locked order sent as `Active` is still refused, because the stored row is still locked.
+
+The same reasoning applies to the write itself. An Update that must not change a field takes that field from the stored row, not from the object that arrived.
+
+Three things are trustworthy on the server: the caller's identity, which comes from the request; what the store holds; and the code. Everything on the object is a claim.
+
+## Behind a Public Endpoint
+
+A hand-written endpoint for outside callers uses the same factory, so the same rules apply to it. To server code a refused Fetch returns `null`, the same as "not found". An endpoint that wants to answer 403 asks the factory first:
+
+<!-- snippet: public-api-authorized -->
+<a id='snippet-public-api-authorized'></a>
+```cs
+public static IEndpointRouteBuilder MapPublicAuthorizedOrderApi(this IEndpointRouteBuilder app)
+{
+    var orders = app.MapGroup("/api/public/authorized-orders");
+
+    orders.MapGet("/{id}", async (int id, IAuthorizedOrderFactory factory, CancellationToken ct) =>
+    {
+        if (!factory.CanFetch(ct).HasAccess)   // the order's rules, asked of its factory
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "The caller may not read this order.");
+
+        return await factory.Fetch(id, ct) is { } order
+            ? Results.Ok(PublicAuthorizedOrder.From(order))
+            : Results.NotFound();
+    });
+
+    return app;
+}
+```
+<sup><a href='/src/Design/Design.Server/PublicApi/PublicOrderApi.cs#L134-L153' title='Snippet source file'>snippet source</a> | <a href='#snippet-public-api-authorized' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+The endpoint does not restate who may read an order. It asks `CanFetch`, the question a screen asks. See [A Public API Over the Same Model](public-api.md).
+
 ## Can* Method Behavior
 
 Where a `Can*` method runs follows the auth class's methods, and whether the operation carries `[AspAuthorize]`, not where the operation itself runs:
@@ -319,8 +463,18 @@ public void AuthorizedOrder_Create_ReturnsNull_WhenDenied()
 
 `[AspAuthorize]` needs a request. Design tests it over HTTP with `WebApplicationFactory` and a test authentication scheme that signs each request in as the user the test names (`Design.Tests/Http/AspAuthorizeHttpTests.cs`).
 
+## When to Leave Each Out
+
+- **No authorization on a type.** A type only ever reached from server code that has already checked, such as a child loaded by its root, needs none of its own. The root's factory is the entry point.
+- **`[AuthorizeFactory<T>]`.** Leave it out when the rule is only "is this an authenticated request with this role" and the screen never needs to ask. `[AspAuthorize]` says that with policies you already have.
+- **`[AspAuthorize]`.** Leave it out when the screen must ask before it acts without a server call, when the rule depends on the record, or when the type is also used with no HTTP request, as in a desktop application or a test. It needs a request to check.
+- **A shared base.** Leave it out when types have no rule in common. A base with one user is an extra file.
+- **A rule that reads the stored record.** Leave it out for state the user may change themselves. It costs a read on every save.
+- **Neither is a substitute for a verdict.** "This draft has no lines yet" is not a refusal. The object says so through a property the screen reads, such as `Order.CanSubmit`.
+
 ## Next Steps
 
+- [A Public API Over the Same Model](public-api.md): the same rules behind a hand-written endpoint
 - [Factory Operations](factory-operations.md): the operations that can be authorized
 - [Save Operation](save-operation.md): authorization and Save's outcomes
 - [ASP.NET Core Integration](aspnetcore-integration.md): server setup and what a failed call looks like

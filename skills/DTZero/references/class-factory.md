@@ -137,7 +137,7 @@ order = (await orderFactory.Save(order))!;      // IsDeleted: Delete
 
 On a factory with `[AuthorizeFactory<T>]`, a new-and-deleted object and a `bool` write that returns `false` both surface as `NotAuthorizedException` today ([#11](https://github.com/NeatooDotNet/DTZero/issues/11)).
 
-## The list cascade
+## The list saves each child
 
 The root's `Insert` and `Update` above make the order's row and hand its line rows to the list factory's `Save`. The list loops: it makes a row for each new line, finds the row of each existing one, removes the row of each removed one, and hands each line its row. Each line maps itself into the row it is handed (`OrderLine` in [SKILL.md](../SKILL.md#one-class-a-child-and-a-root)). The root flushes once.
 
@@ -166,8 +166,8 @@ internal void Fetch(IEnumerable<OrderLineRow> rows, [Service] IOrderLineFactory 
 }
 
 /// <summary>
-/// The cascade: makes, finds or removes each line's row and hands each live
-/// line its row through the line factory's Save.
+/// Saves the lines: makes, finds or removes each line's row and hands each
+/// live line its row through the line factory's Save.
 /// </summary>
 /// <remarks>
 /// Called by Order.Insert and Order.Update through IOrderLineListFactory.Save,
@@ -212,7 +212,7 @@ public void AddLine(IOrderLine line)
     Add((OrderLine)line);
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L286-L354' title='Snippet source file'>snippet source</a> | <a href='#snippet-collection-factory-basic' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L287-L355' title='Snippet source file'>snippet source</a> | <a href='#snippet-collection-factory-basic' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ## Lifecycle hooks
@@ -353,7 +353,7 @@ internal async Task<bool> Fetch(Guid id, [Service] IOrderDbContext db)
     return true;
 }
 ```
-<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L189-L203' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-duality' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Entities/OrderLine.cs#L190-L204' title='Snippet source file'>snippet source</a> | <a href='#snippet-orderline-duality' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 **CS0051** occurs when an `internal` type appears in a `public` method of a `public` class. On an `internal` class, C# caps its `public` methods at `internal`, so an `internal` factory interface can be a `[Service]` parameter there. If you hit CS0051, make the consuming class `internal`.

@@ -1,12 +1,12 @@
 # Getting Started
 
-In [Why DTZero](the-problem.md) you saw the single-layer concept: write your domain model once, load it on both tiers, and let DTZero carry its objects and operations across the seam without DTOs or controllers. This guide makes it real: an `Order` aggregate, the one in DTZero's compiled example set (`src/Design`), built on the client and loaded and saved on the server.
+In [Why DTZero](the-problem.md) you saw the argument: write your domain model once, load it on both tiers, and let DTZero carry its objects and operations across the seam without DTOs or controllers. This guide makes it real: an `Order` aggregate, the one in DTZero's compiled example set (`src/Design`), built on the client and loaded and saved on the server.
 
 ## Prerequisites
 
 - .NET 9.0 or 10.0 SDK
 - ASP.NET Core for server (optional — can use Logical mode for single-tier)
-- Any .NET client (Blazor WebAssembly, MAUI, WPF, console)
+- A .NET client. Blazor WebAssembly is the one DTZero is used with in production; WPF and other .NET clients use it the same way
 
 ## Project Structure
 
@@ -16,7 +16,7 @@ DTZero's architecture needs three projects: one for the domain model (shared), o
 YourSolution/
 ├── YourApp.Domain/          # Shared: Domain models with factory methods
 ├── YourApp.Server/          # ASP.NET Core server (hosts the Blazor WASM client)
-└── YourApp.Client/          # Blazor WASM, MAUI, or other client
+└── YourApp.Client/          # Blazor WASM, WPF, or another .NET client
 ```
 
 For Blazor WebAssembly, the server project hosts the client (hosted WASM). A single `dotnet run` on the server starts both the API and the client application.
@@ -77,11 +77,15 @@ app.UseAuthorization();
 // The DTZero endpoint: one route for every factory call, no controllers
 app.UseDTZero();
 
+// A public API for outside callers: hand-written endpoints over the same factories (PublicApi/)
+app.MapPublicOrderApi();
+app.MapPublicAuthorizedOrderApi();
+
 app.MapFallbackToFile("index.html");
 
 await app.RunAsync();
 ```
-<sup><a href='/src/Design/Design.Server/Program.cs#L61-L83' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-server-program' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Server/Program.cs#L66-L92' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-server-program' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 `AddDTZeroAspNetCore()` registers factories, serialization, and server-side handlers. `UseDTZero()` adds the `/api/dtzero` endpoint — the single entry point for all remote factory calls. `UseBlazorFrameworkFiles()` and `MapFallbackToFile()` enable hosted Blazor WASM — the server serves the client application. `UseAuthentication()` and `UseAuthorization()` sign the caller in before the endpoint runs; your application registers its scheme ([Authorization](authorization.md#configure-the-server)).
@@ -104,7 +108,7 @@ builder.Services.AddKeyedScoped(
 <sup><a href='/src/Design/Design.Client.Blazor/Program.cs#L65-L73' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-client-program' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-`DTZeroFactory.Remote` tells DTZero this is the client side: calls to a `[Remote]` operation are serialized and sent to the server through the keyed HttpClient, and everything else runs on the client.
+`DTZeroFactory.Remote` tells DTZero this is the client side: calls to a `[Remote]` operation are serialized and sent to the server through the keyed HttpClient. Any other call runs on the tier that makes it, which here is the client. `[Remote]` marks where a call crosses, not where code lives: the same operation called on the server runs there, and an `internal` operation without `[Remote]` is server-only.
 
 ## Define Your Domain Model
 
@@ -250,6 +254,7 @@ When the client calls `orderFactory.Save(order)`:
 2. HTTP POST to `/api/dtzero`
 3. Server deserializes the order, resolves `IOrderDbContext` from its DI container
 4. Server calls the order's `Insert` (a new order) with the injected store
+   - `Insert` hands the lines to their list factory, which hands each line to its own: factory methods call factory methods, all on the server
 5. Server serializes the saved order and returns it
 6. Client deserializes it, and the caller keeps it: `order = await orderFactory.Save(order)`
 

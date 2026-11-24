@@ -42,11 +42,15 @@ app.UseAuthorization();
 // The DTZero endpoint: one route for every factory call, no controllers
 app.UseDTZero();
 
+// A public API for outside callers: hand-written endpoints over the same factories (PublicApi/)
+app.MapPublicOrderApi();
+app.MapPublicAuthorizedOrderApi();
+
 app.MapFallbackToFile("index.html");
 
 await app.RunAsync();
 ```
-<sup><a href='/src/Design/Design.Server/Program.cs#L61-L83' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-server-program' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Server/Program.cs#L66-L92' title='Snippet source file'>snippet source</a> | <a href='#snippet-getting-started-server-program' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 `AddDesignServer()` holds the server's whole composition, so a test can build exactly what the server builds. Its DTZero line is:
@@ -79,12 +83,13 @@ services.AddSingleton<ITaxTable, InMemoryTaxTable>();
 services.AddSingleton<ICustomerPreferencesStore, InMemoryCustomerPreferencesStore>();
 services.AddSingleton<ISupportLog, InMemorySupportLog>();
 services.AddSingleton<ICheckoutLedger, InMemoryCheckoutLedger>();
+services.AddSingleton<ILockableOrderStore, InMemoryLockableOrderStore>();
 services.AddScoped(_ => new TenantTokenService("server-token"));
 services.AddScoped<ITenantTokenService>(sp => sp.GetRequiredService<TenantTokenService>());
 
 services.RegisterMatchingName(typeof(IOrder).Assembly);
 ```
-<sup><a href='/src/Design/Design.Server/ServerServices.cs#L197-L210' title='Snippet source file'>snippet source</a> | <a href='#snippet-aspnetcore-service-registration' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Server/ServerServices.cs#L198-L212' title='Snippet source file'>snippet source</a> | <a href='#snippet-aspnetcore-service-registration' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 `RegisterMatchingName` registers each `IName` → `Name` pair in the assemblies you pass, **transient**, with `TryAdd`. It also registers each matched concrete type by itself. Three things follow:
@@ -304,6 +309,13 @@ That round trip has no HTTP, so no middleware runs and there are no status codes
 | `AddDTZeroAspNetCore(assemblies)` | Register the generated factories in server mode, with the serializer, `IAspAuthorize` and the request handler |
 | `AddDTZeroAspNetCore(options, assemblies)` | The same, with a serialization format the client must match |
 | `UseDTZero()` | Map `POST /api/dtzero`, with correlation, format header and cancellation |
+
+## When to Leave It Out
+
+- **An application with no remote client.** A test, a console tool or any single process registers Logical mode with `AddDTZero` and needs no `DTZero.AspNetCore`. See [Factory Modes](factory-modes.md).
+- **As a public API.** `/api/dtzero` is for the client that ships with the server. Outside callers get endpoints you design: [A Public API Over the Same Model](public-api.md).
+
+It does not take over the application. Controllers and minimal API endpoints of your own run beside it.
 
 ## Next Steps
 

@@ -145,12 +145,13 @@ services.AddSingleton<ITaxTable, InMemoryTaxTable>();
 services.AddSingleton<ICustomerPreferencesStore, InMemoryCustomerPreferencesStore>();
 services.AddSingleton<ISupportLog, InMemorySupportLog>();
 services.AddSingleton<ICheckoutLedger, InMemoryCheckoutLedger>();
+services.AddSingleton<ILockableOrderStore, InMemoryLockableOrderStore>();
 services.AddScoped(_ => new TenantTokenService("server-token"));
 services.AddScoped<ITenantTokenService>(sp => sp.GetRequiredService<TenantTokenService>());
 
 services.RegisterMatchingName(typeof(IOrder).Assembly);
 ```
-<sup><a href='/src/Design/Design.Server/ServerServices.cs#L197-L210' title='Snippet source file'>snippet source</a> | <a href='#snippet-aspnetcore-service-registration' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Server/ServerServices.cs#L198-L212' title='Snippet source file'>snippet source</a> | <a href='#snippet-aspnetcore-service-registration' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Each remote call is one HTTP request, and its services come from that request's scope. A scoped service is therefore shared within one call: by the factory method, the operations it calls through other factories, and its `Immediate` event handlers. `ICorrelationContext`, above, is scoped: the middleware writes the request's correlation ID into it, and `_ReportProblem` reads it in the same scope. A client usually has one long-lived scope, so scoped and singleton services behave alike there.
@@ -259,6 +260,12 @@ This approach is:
 4. **Isolated:** no external dependencies.
 
 The whole harness is `src/Design/Design.Tests/TestInfrastructure/DesignClientServerContainers.cs`.
+
+## When to Leave [Service] Out
+
+- **A value the caller supplies** is an ordinary parameter. `[Service]` is only for what comes from DI.
+- **A service every instance needs, on both tiers,** goes in the constructor, and both tiers register it.
+- **A server-only service never goes in the constructor** of a type the client also builds. Take it as a `[Service]` parameter of the operation that runs on the server.
 
 ## Next Steps
 

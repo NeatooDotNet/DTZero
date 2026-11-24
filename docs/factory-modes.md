@@ -9,7 +9,7 @@ The mode is set when you register DTZero in DI:
 | Mode | What a factory call does | Use for |
 |------|--------------------------|---------|
 | **Server** | Runs every operation here, and handles the `[Remote]` calls clients send | ASP.NET Core server |
-| **Remote** | Serializes each operation that crosses (`[Remote]`, or authorized on the server) and sends it over HTTP; runs every other operation here | Client apps (Blazor, MAUI, WPF, console) |
+| **Remote** | Serializes each operation that crosses (`[Remote]`, or authorized on the server) and sends it over HTTP; runs every other operation here | Client apps (Blazor WebAssembly, WPF, console) |
 | **Logical** | Runs every operation here, `[Remote]` ones included, with nothing serialized | Tests, console tools, single-tier apps |
 
 ### Server
@@ -96,6 +96,11 @@ services.AddLogging(logging => logging
 <!-- endSnippet -->
 
 A call that logs a client remote call and then a server "Handling" entry crossed; an operation that logs only a factory entry on the client ran there.
+
+## When Not to Use Logical
+
+- **In a client that has a server.** Logical runs every operation in the process that calls it. A `[Remote]` operation would run in the client and fail on its first server-only service.
+- **As the only test of something that crosses.** Logical serializes nothing. A type that must survive the round trip needs a test on the client/server containers.
 
 ## Next Steps
 

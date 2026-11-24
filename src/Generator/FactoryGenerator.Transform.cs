@@ -68,6 +68,230 @@ public partial class Factory
 	}
 
 	/// <summary>
+	/// Gets the methods of an authorization type named by <c>[AuthorizeFactory&lt;T&gt;]</c>,
+	/// including every method it inherits.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// A class contributes its own methods and those of each base class (<see cref="GetMethodsRecursive"/>).
+	/// An interface has no base type, so it contributes its own methods and those of every interface
+	/// it inherits, through <see cref="ITypeSymbol.AllInterfaces"/>. That list holds each interface once,
+	/// so a check reachable through two inheritance paths (a diamond) is read once.
+	/// </para>
+	/// <para>
+	/// Both walks list the most-derived declarations first: the class walk by construction, the
+	/// interface walk because <c>AllInterfaces</c> lists an interface before the interfaces it inherits.
+	/// </para>
+	/// <para>
+	/// A class also contributes the checks declared on every interface it implements, directly or
+	/// through a base class (<c>AllInterfaces</c> again), after the class hierarchy.
+	/// </para>
+	/// <para>
+	/// A check declared with <c>[AuthorizeFactory]</c> at more than one place — an override or
+	/// <c>new</c> member restating it, a derived interface restating it, a class restating an
+	/// interface's check, or two unrelated interfaces declaring it — is one check (same name and
+	/// parameter types). It is returned once, as its most-derived declaration in source, and the
+	/// other declarations are returned in <paramref name="restatements"/>: the caller generates one
+	/// call, through the auth type, for the union of every declaration's operations. A restatement
+	/// adds operations and never removes one (user ruling, PITCH-009). The call binds to the
+	/// auth type's member, so it runs the most-derived implementation once.
+	/// </para>
+	/// <para>
+	/// A check the generated factory cannot call through the auth type is not returned but added to
+	/// <paramref name="notCallable"/> (NF0108): a check whose attribute sits on an explicit interface
+	/// implementation, and an interface check the class implements explicitly or not at all (a
+	/// default interface implementation). A call to either through the auth type does not compile.
+	/// </para>
+	/// </remarks>
+	private static List<IMethodSymbol> GetAuthMethodsRecursive(
+		INamedTypeSymbol? authSymbol,
+		List<string> messages,
+		List<IMethodSymbol>? notCallable = null,
+		Dictionary<IMethodSymbol, List<IMethodSymbol>>? restatements = null)
+	{
+		if (authSymbol == null)
+		{
+			return [];
+		}
+
+		var isInterface = authSymbol.TypeKind == TypeKind.Interface;
+
+		var declared = isInterface
+			? authSymbol.GetMembers().OfType<IMethodSymbol>().ToList()
+			: GetMethodsRecursive(authSymbol);
+
+		var inherited = new List<IMethodSymbol>();
+		foreach (var inheritedInterface in authSymbol.AllInterfaces)
+		{
+			// A class reads only the checks on its interfaces; an interface keeps every member, as before.
+			inherited.AddRange(inheritedInterface.GetMembers().OfType<IMethodSymbol>()
+				.Where(m => isInterface || IsAuthorizeFactoryMethod(m)));
+		}
+
+		// Each entry is either a method without [AuthorizeFactory] (kept as before, for the debug
+		// messages the caller writes) or the group of [AuthorizeFactory] declarations of one check,
+		// placed where that check is first declared, most-derived declaration first.
+		var entries = new List<List<IMethodSymbol>>();
+		var groups = new Dictionary<string, List<IMethodSymbol>>();
+
+		void AddCheck(IMethodSymbol method)
+		{
+			var signature = AuthMethodSignature(method);
+			if (groups.TryGetValue(signature, out var group))
+			{
+				messages.Add($"Combining {method.ContainingType.Name}.{method.Name} with a more-derived declaration of the same check on {authSymbol.Name}");
+				group.Add(method);
+				return;
+			}
+
+			group = [method];
+			groups.Add(signature, group);
+			entries.Add(group);
+		}
+
+		// Interface members whose explicit implementation already carries the attribute and has been
+		// reported, so the interface's own declaration of the same check is not reported again.
+		var reportedInterfaceMembers = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
+
+		foreach (var method in declared)
+		{
+			if (!IsAuthorizeFactoryMethod(method))
+			{
+				entries.Add([method]);
+				continue;
+			}
+
+			if (method.MethodKind == MethodKind.ExplicitInterfaceImplementation)
+			{
+				notCallable?.Add(method);
+				foreach (var interfaceMember in method.ExplicitInterfaceImplementations)
+				{
+					reportedInterfaceMembers.Add(interfaceMember);
+				}
+				continue;
+			}
+
+			AddCheck(method);
+		}
+
+		foreach (var method in inherited)
+		{
+			if (!IsAuthorizeFactoryMethod(method))
+			{
+				entries.Add([method]);
+				continue;
+			}
+
+			if (reportedInterfaceMembers.Contains(method))
+			{
+				continue;
+			}
+
+			// Callability first: an interface check the class does not implement implicitly is
+			// NF0108 even when a class method of the same signature is a check, because the call
+			// through the auth type would run that method, not this interface's implementation.
+			if (!isInterface)
+			{
+				var implementation = authSymbol.FindImplementationForInterfaceMember(method) as IMethodSymbol;
+				if (implementation == null
+					|| implementation.MethodKind == MethodKind.ExplicitInterfaceImplementation
+					|| implementation.ContainingType.TypeKind == TypeKind.Interface)
+				{
+					notCallable?.Add(method);
+					continue;
+				}
+			}
+
+			AddCheck(method);
+		}
+
+		// One method per entry. For a check, the representative is the most-derived declaration in
+		// source (its syntax is what the check is generated from); the other declarations of the
+		// same check are handed back in restatements so their operations can be combined with it.
+		var methods = new List<IMethodSymbol>();
+		foreach (var entry in entries)
+		{
+			if (entry.Count == 1)
+			{
+				methods.Add(entry[0]);
+				continue;
+			}
+
+			var representative = entry.FirstOrDefault(m => m.DeclaringSyntaxReferences.Length > 0) ?? entry[0];
+			methods.Add(representative);
+			restatements?.Add(representative, entry.Where(m => !SymbolEqualityComparer.Default.Equals(m, representative)).ToList());
+		}
+
+		return methods;
+	}
+
+	/// <summary>
+	/// Name and parameter types: two declarations with the same signature are one check. Nullable
+	/// reference annotations are left out (<c>string?</c> and <c>string</c> are one check);
+	/// nullable value types stay distinct, since <c>int?</c> is a different type.
+	/// </summary>
+	private static string AuthMethodSignature(IMethodSymbol method) =>
+		$"{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)))})";
+
+	/// <summary>
+	/// The operations an <c>[AuthorizeFactory]</c> declaration names, read from its bound attribute
+	/// constant: the source of truth for every declaration, in source or referenced, whatever form
+	/// the argument is written in (<c>AuthorizeFactoryOperation.X</c>, a <c>using</c> alias, a
+	/// <c>const</c>, a cast). Null when it cannot be read, which the caller reports (NF0109, or NF0107
+	/// for a declaration not in source).
+	/// </summary>
+	private static AuthorizeFactoryOperation? ReadAuthorizeOperations(IMethodSymbol method) =>
+		ReadAuthorizeOperations(method.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name == "AuthorizeFactoryAttribute"));
+
+	private static AuthorizeFactoryOperation? ReadAuthorizeOperations(AttributeData? attribute)
+	{
+		if (attribute == null || attribute.ConstructorArguments.Length != 1)
+		{
+			return null;
+		}
+
+		var argument = attribute.ConstructorArguments[0];
+		return argument.Kind != TypedConstantKind.Error && argument.Value is int value
+			? (AuthorizeFactoryOperation)value
+			: null;
+	}
+
+	/// <summary>
+	/// Whether every factory operation <paramref name="named"/> applies to is also checked by
+	/// <paramref name="covering"/>, by the same matching the factory methods use.
+	/// </summary>
+	private static bool CoversEveryOperation(AuthorizeFactoryOperation covering, AuthorizeFactoryOperation named)
+	{
+		FactoryOperation[] operations =
+		[
+			FactoryOperation.Create, FactoryOperation.Fetch, FactoryOperation.Insert,
+			FactoryOperation.Update, FactoryOperation.Delete, FactoryOperation.Execute
+		];
+
+		return operations.All(o => ((int)named & (int)o) == 0 || ((int)covering & (int)o) != 0);
+	}
+
+	private static bool HasRemoteAttribute(IMethodSymbol method) =>
+		method.GetAttributes().Any(a => a.AttributeClass?.Name == "RemoteAttribute");
+
+	/// <summary>
+	/// The interface member a not-callable check stands for, as <c>IChecks.CanRead</c>.
+	/// </summary>
+	private static string InterfaceCheckDisplay(IMethodSymbol method)
+	{
+		var member = method.MethodKind == MethodKind.ExplicitInterfaceImplementation
+			? method.ExplicitInterfaceImplementations.FirstOrDefault() ?? method
+			: method;
+		return $"{member.ContainingType.Name}.{member.Name}";
+	}
+
+	/// <summary>
+	/// Whether the method carries <c>[AuthorizeFactory(...)]</c>, i.e. is an authorization check.
+	/// </summary>
+	private static bool IsAuthorizeFactoryMethod(IMethodSymbol method) =>
+		method.GetAttributes().Any(a => a.AttributeClass?.Name == "AuthorizeFactoryAttribute");
+
+	/// <summary>
 	/// Extracts factory method information from a type's methods.
 	/// Identifies methods with factory operation attributes (Create, Fetch, Insert, Update, Delete, Execute)
 	/// and validates their signatures.
@@ -321,12 +545,77 @@ public partial class Factory
 				concreteClassName = FindConcreteImplementation(semanticModel.Compilation, authNamedType);
 			}
 
+			// NF0107: a check in the auth type's hierarchy that cannot be generated is reported, never
+			// dropped with only a debug message. Reported at the [AuthorizeFactory<T>] usage; when
+			// that is not in source (inherited from a referenced base), at the factory type.
+			var authTypeName = authorizationRuleType?.Name ?? "";
+			var reportLocation = authorizeAttribute.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+				?? typeSymbol.Locations.FirstOrDefault(l => l.IsInSource);
+
+			void ReportAt(Location? location, string diagnosticId, params string[] args)
+			{
+				if (location == null)
+				{
+					return;
+				}
+
+				var lineSpan = location.GetLineSpan();
+				diagnostics.Add(new DiagnosticInfo(
+					diagnosticId,
+					lineSpan.Path ?? "",
+					lineSpan.StartLinePosition.Line,
+					lineSpan.StartLinePosition.Character,
+					lineSpan.EndLinePosition.Line,
+					lineSpan.EndLinePosition.Character,
+					location.SourceSpan.Start,
+					location.SourceSpan.Length,
+					args));
+			}
+
+			void ReportAtAuthorizeFactory(string diagnosticId, params string[] args) =>
+				ReportAt(reportLocation, diagnosticId, args);
+
+			// NF0109: the operations of an in-source [AuthorizeFactory] declaration could not be read
+			// from its bound constant. Reported at that declaration's attribute; no check is generated
+			// from it, and the build fails rather than leaving its operations unchecked.
+			void ReportOperationsNotReadable(IMethodSymbol methodSymbol, Location attributeLocation)
+			{
+				messages.Add($"NF0109: operations of {methodSymbol.ContainingType.Name}.{methodSymbol.Name} could not be read");
+				ReportAt(attributeLocation, "NF0109", authTypeName, methodSymbol.ContainingType.ToDisplayString(), methodSymbol.Name);
+			}
+
+			void ReportCheckNotInSource(IMethodSymbol methodSymbol)
+			{
+				messages.Add($"NF0107: authorization check {methodSymbol.ContainingType.Name}.{methodSymbol.Name} has no source declaration; no check generated for {authTypeName}");
+				ReportAtAuthorizeFactory("NF0107", authTypeName, methodSymbol.ContainingType.ToDisplayString(), methodSymbol.Name);
+			}
+
+			// NF0108: a check the generated factory cannot call through the auth type (an explicit
+			// interface implementation, or none on the class). No call is generated for it.
+			var notCallable = new List<IMethodSymbol>();
+
+			// Other declarations of the same check, keyed by the declaration it is generated from.
+			var restatements = new Dictionary<IMethodSymbol, List<IMethodSymbol>>(SymbolEqualityComparer.Default);
+
+			void ReportNotCallable()
+			{
+				foreach (var methodSymbol in notCallable)
+				{
+					var check = InterfaceCheckDisplay(methodSymbol);
+					messages.Add($"NF0108: authorization check {check} is not callable on {authTypeName}; no check generated");
+					ReportAtAuthorizeFactory("NF0108", authTypeName, check);
+				}
+			}
+
 			if (authorizationRuleType?.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is TypeDeclarationSyntax syntax)
 			{
 				var authSemanticModel = semanticModel.Compilation.GetSemanticModel(syntax.SyntaxTree);
 				var authSymbol = authSemanticModel.GetDeclaredSymbol(syntax);
 
-				var methodSymbols = GetMethodsRecursive(authSymbol);
+				// Checks the auth type inherits (from base classes or base interfaces) are read
+				// as well as the ones it declares.
+				var methodSymbols = GetAuthMethodsRecursive(authSymbol, messages, notCallable, restatements);
+				ReportNotCallable();
 
 				foreach (var methodSymbol in methodSymbols)
 				{
@@ -347,6 +636,16 @@ public partial class Factory
 					if (methodSymbol.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is not MethodDeclarationSyntax methodSyntax)
 					{
 						messages.Add($"No MethodDeclarationSyntax for {methodSymbol.Name}");
+						if (IsAuthorizeFactoryMethod(methodSymbol))
+						{
+							// The representative is the most-derived declaration in source when there is
+							// one, so here no declaration of this check is in source.
+							ReportCheckNotInSource(methodSymbol);
+							if (restatements.TryGetValue(methodSymbol, out var otherDeclarations))
+							{
+								otherDeclarations.ForEach(ReportCheckNotInSource);
+							}
+						}
 						continue;
 					}
 
@@ -359,31 +658,69 @@ public partial class Factory
 							if (attribute.ApplicationSyntaxReference?.GetSyntax() is not AttributeSyntax attributeSyntax)
 							{
 								messages.Add($"No AttributeSyntax for {methodSymbol.Name} {attribute.ToString()}");
+								ReportCheckNotInSource(methodSymbol);
 								continue;
 							}
 
-							var attr = attributeSyntax.ArgumentList?.Arguments.ToFullString();
-
-							var pattern = @"AuthorizeFactoryOperation\.(\w+)";
-
-							// Use Regex.Matches to find all matches in the attr string
-							var matches = Regex.Matches(attr, pattern);
-							var authorizeOperationList = new List<AuthorizeFactoryOperation>();
-
-							foreach (Match match in matches)
+							// Read from the bound attribute constant, not the argument's text, so an alias, a
+							// const or a cast reads as reliably as AuthorizeFactoryOperation.X.
+							var representativeOperations = ReadAuthorizeOperations(attribute);
+							if (representativeOperations == null)
 							{
-								// Extract the matched value (e.g., "Read", "Write")
-								var value = match.Groups[1].Value;
-
-								// Try to parse the value into the AuthorizeFactoryOperation enum
-								if (Enum.TryParse<AuthorizeFactoryOperation>(value, out var dmType))
-								{
-									// Successfully parsed the value into the AuthorizeFactoryOperation enum
-									authorizeOperationList.Add(dmType);
-								}
+								ReportOperationsNotReadable(methodSymbol, attributeSyntax.GetLocation());
+								continue;
 							}
 
-							var authorizeFactoryOperation = authorizeOperationList.Aggregate((a, b) => a | b);
+							var authorizeFactoryOperation = representativeOperations.Value;
+							var isRemoteByRestatement = false;
+
+							// The same check declared elsewhere in the hierarchy: one call, for the union of
+							// every declaration's operations. A restatement adds operations, never removes one.
+							if (restatements.TryGetValue(methodSymbol, out var otherDeclarations))
+							{
+								var notInSource = new List<IMethodSymbol>();
+
+								foreach (var other in otherDeclarations)
+								{
+									// [Remote] on any declaration makes the combined check [Remote]: it then
+									// runs on the server and its Can* asks the server, so combining never
+									// moves a check off the server.
+									isRemoteByRestatement |= HasRemoteAttribute(other);
+
+									var otherSyntax = other.GetAttributes()
+										.FirstOrDefault(a => a.AttributeClass?.Name == "AuthorizeFactoryAttribute")
+										?.ApplicationSyntaxReference?.GetSyntax() as AttributeSyntax;
+
+									if (otherSyntax == null)
+									{
+										notInSource.Add(other);
+										continue;
+									}
+
+									var otherOperations = ReadAuthorizeOperations(other);
+									if (otherOperations == null)
+									{
+										// Never a silent zero: operations nobody can read would go unchecked.
+										ReportOperationsNotReadable(other, otherSyntax.GetLocation());
+										continue;
+									}
+
+									authorizeFactoryOperation |= otherOperations.Value;
+								}
+
+								messages.Add($"Combined {otherDeclarations.Count + 1} declarations of {methodSymbol.Name} on {authTypeName}: {authorizeFactoryOperation}");
+
+								// A declaration with no source syntax is NF0107 unless the source
+								// declarations already check every operation it names.
+								foreach (var other in notInSource)
+								{
+									var named = ReadAuthorizeOperations(other);
+									if (named == null || !CoversEveryOperation(authorizeFactoryOperation, named.Value))
+									{
+										ReportCheckNotInSource(other);
+									}
+								}
+							}
 
 							if (!(methodType == "bool" || methodType == "string" || methodType == "string?"))
 							{
@@ -406,6 +743,18 @@ public partial class Factory
 							}
 
 							var authMethodInfo = new TypeAuthMethodInfo(authorizeFactoryOperation, methodSymbol, methodSyntax, concreteClassName);
+
+							// The check is resolved and called through the auth type the factory names,
+							// wherever the method is declared. MethodInfo records the declaring type, which
+							// for an inherited check is a base class or base interface: resolving that
+							// would make the base a second service to register (an abstract base cannot be
+							// registered at all). For a check T declares itself this is the same name.
+							authMethodInfo.ClassName = authSymbol!.Name;
+
+							if (isRemoteByRestatement)
+							{
+								authMethodInfo.MarkRemote();
+							}
 
 							// Mark auth method parameters whose type matches the entity type as IsTarget.
 							// This enables: (1) passing the target entity to auth methods on write operations,
@@ -432,6 +781,21 @@ public partial class Factory
 			else
 			{
 				messages.Add($"No TypeDeclarationSyntax for {authorizeAttribute}");
+
+				// The auth type itself is not in source (a referenced assembly): none of its checks
+				// can be generated, so each one it carries is reported.
+				foreach (var methodSymbol in GetAuthMethodsRecursive(authorizationRuleType as INamedTypeSymbol, messages, notCallable, restatements))
+				{
+					if (IsAuthorizeFactoryMethod(methodSymbol))
+					{
+						ReportCheckNotInSource(methodSymbol);
+						if (restatements.TryGetValue(methodSymbol, out var otherDeclarations))
+						{
+							otherDeclarations.ForEach(ReportCheckNotInSource);
+						}
+					}
+				}
+				ReportNotCallable();
 			}
 		}
 		else

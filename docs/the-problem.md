@@ -1,80 +1,44 @@
 # Why DTZero
 
-## The Goal
+## The problem is older than the tools
 
-Write your domain model as if it's a single layer. Don't think about client vs server, serialization, HTTP endpoints, or service resolution differences between tiers. Put the behavior where it belongs — on the domain object — and let the infrastructure carry it across the wire.
+A domain model could not run in a JavaScript client. So for a generation of web applications the server flattened its objects to JSON and the client rebuilt something like them in another language. That is where the layers came from:
 
-That's what DTZero does. When the library that defines your objects is loaded on both the client and the server, the seam between them needs no DTOs and no controllers: the objects themselves cross, and their operations run on the tier that has what they need. Persistence routing (Create, Fetch, then one `Save()` that runs Insert, Update or Delete) is one use of that, and so are read models, commands and the services a client calls.
+- **DTOs**, to carry state across
+- **API controllers**, to expose each operation as an endpoint
+- **Mapping code**, between the DTOs and the domain objects
+- **Client-side copies of the rules**, because the screen needs them too
 
-## The Traditional Problem
+Every property exists in several places. A new field is a change in three or four files. The rule that decides whether an order can be submitted is written on the server, and again, slightly differently, in the client.
 
-In a typical 3-tier .NET application, getting an entity from the client to the database requires layers of infrastructure:
+None of this was a design choice. It was a workaround for a language boundary. With Blazor WebAssembly the boundary is gone: the assembly that defines `Order` loads in the browser and on the server. WPF and other .NET clients never had the boundary. The layers are still built, out of habit.
 
-- **DTOs** to serialize state across the wire
-- **API controllers** to expose each operation as an endpoint
-- **Factories or mapping code** to convert between DTOs and domain objects
-- **Different service wiring** on client vs server
+## What DTZero does instead
 
-Every property exists in multiple places. Every new field means changes in three or four files. The domain model — the thing that matters — gets buried under plumbing.
+You write the domain model once, in a library both tiers load. DTZero is a Roslyn source generator that reads the attributes on your classes and generates what goes between them and the wire: a factory per type, the serialization, and one endpoint for every call.
 
-## DTZero's Approach
+The client calls the factory:
 
-DTZero eliminates those layers by generating them at compile time from attributes on your domain classes. But the real value isn't the code generation — that's just the mechanism. The value is that you write your domain model as a single-layer design, and DTZero takes care of getting each operation to the tier that runs it, with that tier's services.
-
-Consider what happens when you call `Save()` on an entity:
-
-**WRONG: the traditional approach** — what you write without DTZero, and what it replaces:
-```csharp
-// Controller
-[HttpPost] public async Task<ActionResult<OrderDto>> Save(OrderDto dto) { ... }
-[HttpPut]  public async Task<ActionResult<OrderDto>> Update(OrderDto dto) { ... }
-[HttpDelete] public async Task Delete(int id) { ... }
-
-// Mapping
-var entity = MapFromDto(dto);
-// ... persist ...
-return MapToDto(entity);
-
-// Factory
-public Order CreateFromDto(OrderDto dto) { ... }
-```
-
-**With DTZero** — you write the operations on the object itself:
-
-<!-- snippet: readme-domain-model -->
-<a id='snippet-readme-domain-model'></a>
+<!-- snippet: readme-client-usage -->
+<a id='snippet-readme-client-usage'></a>
 ```cs
-/// <summary>
-/// Creates a new Order. Local: runs on the tier that calls it.
-/// </summary>
-[Create]
-public void Create(
-    string customerName,
-    [Service] IOrderLineListFactory lineListFactory)
-{
-    CustomerName = customerName;
-    Lines = lineListFactory.Create();
-    Status = OrderStatus.Draft;
-    IsNew = true;
-}
+// The customer's draft: the stored one, or a new one. One server call.
+IOrder? order = await orderFactory.OpenDraft("Customer_42");
 
-/// <summary>
-/// Loads an existing Order and its lines; false when there is none.
-/// </summary>
-[Remote, Fetch]
-internal async Task<bool> Fetch(
-    int id,
-    [Service] IOrderDbContext db,
-    [Service] IOrderLineListFactory lineListFactory)
-{
-    var row = await db.FindAsync(id);
-    if (row == null)
-        return false;
+// Build a line on the client and add it. No server call.
+order.AddLine(lineFactory.Create("Widget C", 12.50m, 2));
 
-    LoadFrom(row, lineListFactory);
-    return true;
-}
+// Save sends the whole order; keep what it returns.
+order = await orderFactory.Save(order);
+```
+<sup><a href='/src/Design/Design.Tests/FactoryTests/OrderUsageTests.cs#L31-L40' title='Snippet source file'>snippet source</a> | <a href='#snippet-readme-client-usage' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
 
+The operation is a method on the domain class. `[Remote]` marks it as an entry point from the client; its `[Service]` parameters are resolved on the server, so the store is something the client never sees:
+
+<!-- snippet: operations-insert -->
+<a id='snippet-operations-insert'></a>
+```cs
 /// <summary>
 /// Inserts a new Order and its lines.
 /// </summary>
@@ -90,72 +54,66 @@ internal async Task Insert(
     await db.SaveChangesAsync();
     Id = row.Id;
 }
-
-/// <summary>
-/// Updates an existing Order and its lines.
-/// </summary>
-[Remote, Update]
-internal async Task Update(
-    [Service] IOrderDbContext db,
-    [Service] IOrderLineListFactory lineListFactory)
-{
-    var row = await db.FindAsync(Id)
-        ?? throw new KeyNotFoundException($"Order {Id} not found");
-    MapTo(row);
-    lineListFactory.Save(Lines, row.Lines);
-    await db.SaveChangesAsync();
-}
-
-/// <summary>
-/// Deletes an Order. Its line rows go with its row.
-/// </summary>
-[Remote, Delete]
-internal async Task Delete([Service] IOrderDbContext db)
-{
-    var row = await db.FindAsync(Id)
-        ?? throw new KeyNotFoundException($"Order {Id} not found");
-    db.Remove(row);
-    await db.SaveChangesAsync();
-}
 ```
-<sup><a href='/src/Design/Design.Domain/Aggregates/Order.cs#L234-L318' title='Snippet source file'>snippet source</a> | <a href='#snippet-readme-domain-model' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/Design/Design.Domain/Aggregates/Order.cs#L270-L286' title='Snippet source file'>snippet source</a> | <a href='#snippet-operations-insert' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-The caller calls `order = await orderFactory.Save(order)`. DTZero picks Insert, Update, or Delete from the object's own state (`IsNew`, `IsDeleted`), serializes the object to the server, resolves the store from server-side DI, and calls your method. No DTOs, no controllers, no mapping.
+`Save` picks Insert, Update or Delete from the object's own state. The compiler checks the call on both sides, because both sides are the same code.
 
-## What Gets Generated
+## The graph that crosses is the model, not the tables
 
-DTZero generates everything between your domain class and the wire:
+The objects DTZero carries are your conceptual model: the aggregate as the domain describes it. They are not your storage model. The EF entities, or whatever shape your store has, stay on the server, behind a `[Service]` parameter. Each object maps itself to its own row, and the two shapes are free to differ.
 
+So DTZero does not put Entity Framework on the client, and it does not ask your entities to match your tables. It supplies no repository and no persistence model. Those remain yours, and remain on the server.
+
+## The one idea: factory methods call factory methods
+
+The client calls one factory method. That call crosses. From there, factory methods call factory methods on the server, and nothing else crosses.
+
+```text
+client                      server
+------                      ------
+orderFactory.Save(order) -> Order.Insert                 writes the order's row
+                              lineListFactory.Save       walks the lines
+                                lineFactory.Save         each line writes its own row
+
+orderFactory.Fetch(id)   -> Order.Fetch                  reads the order's row
+                              lineListFactory.Fetch      walks the line rows
+                                lineFactory.Fetch(row)   each line reads its own row
 ```
-Your Code                    Generated
-─────────                    ─────────
-Domain Model + Attributes →  Factory interfaces + implementations
-                             Serialization handling
-                             HTTP endpoint routing
-                             Service resolution per side
-```
 
-The domain model is the single source of truth. Changes happen in one place.
+In other designs, loading and storing an aggregate as a whole is the repository's work, and one class has to know the entire graph. Here each object knows only its own row and hands the rest on. An ORM would call the save half of this a cascade; here it is plain method calls that you can read and step through.
+
+Root and child follow from the same idea. They are roles, not kinds of class. An entity is a root where the client calls its factory method, and a child where another factory method does. The parameters of the method are the whole difference, and one class can have both. [Client-Server Architecture](client-server-architecture.md) shows an entity in both roles.
+
+## What about callers you do not control?
+
+Your own client ships with your server and is built from the same source, so it needs no separate contract. An outside caller does. For that you still design an API by hand, and its endpoints call the same factories and the same domain methods. The contract is designed; the logic exists once. See [A Public API Over the Same Model](public-api.md).
+
+## Who it is for
+
+Teams building an application with a .NET client, where the client and the server are built and deployed together, and the domain has behavior worth keeping in one place. It is used in production with Blazor WebAssembly. A WPF client uses it the same way.
+
+It works with any class: an aggregate, a read model, a static command, a record. No base class is required. [DDD Concepts in DTZero](ddd-concepts.md) shows where each concept lands.
+
+## When not to use it
+
+- **Your only client is not .NET.** It cannot load your assembly. Design an HTTP API.
+- **Blazor Server only, with no plan for a client tier.** There is no seam to remove.
+- **Thin CRUD.** Forms over tables with no behavior gain little from a domain model on the client.
+- **Client and server are versioned and deployed apart.** DTZero assumes both tiers come from the same source. If old clients must work against new servers for long periods, you need a versioned contract.
 
 ## Coming from CSLA?
 
-If you know CSLA, DTZero is the DataPortal pattern implemented through source generation instead of runtime reflection. Same concept — domain objects that carry their own operations across the client/server boundary — but resolved at compile time.
+DTZero owes the idea to [CSLA .NET](https://cslanet.com), which has moved business objects between tiers for over twenty years. The operations will look familiar. The difference is that DTZero asks for no base class and works with any type.
 
-## Who Benefits
+## Working with an AI assistant
 
-DTZero is designed for any .NET client that needs to call a server:
+An assistant trained on mainstream .NET reaches for a DTO and a controller, and will do so in a DTZero project unless told otherwise. The repository ships a skill, `skills/DTZero`, that teaches the model: where a call crosses, who writes a child's row, what `[Remote]` means. It is self-contained and can be copied into your own project. It is part of the library, kept in step with the same compiled samples as these pages.
 
-- **Blazor WebAssembly** with ASP.NET Core backends
-- **MAUI** applications with server-side persistence
-- **WPF, console, or any .NET client** that calls a .NET server
-- **Domain-driven designs** where entities have behavior, not just data
-- **Teams tired of maintaining** DTO layers and mapping code
+## Next steps
 
-The pattern is the same regardless of client technology: your domain class declares its operations, and DTZero carries them to the tier that runs them.
-
-## Next Steps
-
-- [Getting Started](getting-started.md) — Build your first DTZero application
-- [Factory Operations](factory-operations.md) — Create, Fetch, Insert, Update, Delete and Execute
-- [Client-Server Architecture](client-server-architecture.md) — How the client/server split works
+- [Getting Started](getting-started.md): build the first application
+- [Client-Server Architecture](client-server-architecture.md): where calls cross, and where they do not
+- [DDD Concepts in DTZero](ddd-concepts.md): each concept and where it lands
+- [Decision Guide](decision-guide.md): which piece to use when
